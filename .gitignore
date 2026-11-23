@@ -1,0 +1,8 @@
+# Dependencies and build output
+plugin/node_modules/
+plugin/dist/
+plugin/.eslintcache
+plugin/*.tar.gz
+plugin/*.tar.gz.sha256
+# Local agent and editor state
+.claude/

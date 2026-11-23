@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: hangar-system
+resources:
+  - node-agent.yaml
+configMapGenerator:
+  - name: hangar-node-agent-scripts
+    files:
+      - agent.sh
+      - render.awk
+    options:
+      labels:
+        app.kubernetes.io/name: hangar-node-agent
+        app.kubernetes.io/part-of: hangar

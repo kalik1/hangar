@@ -1,0 +1,181 @@
+name: Release
+
+# A tag v<version> on main (version = plugin/package.json):
+# 1. the CI checks;
+# 2. the image ghcr.io/<owner>/hangar-headlamp-plugin:<version> for amd64
+#    and arm64;
+# 3. a GitHub Release with the packaged plugin (headlamp-plugin package),
+#    its sha256 and its artifacthub-pkg.yml;
+# 4. the Artifact Hub metadata committed to main under
+#    artifacthub/hangar-headlamp-plugin/<version>/.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/hangar-headlamp-plugin
+  PACKAGE_NAME: hangar-headlamp-plugin
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: The tag is on main and matches the files
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'${GITHUB_REF_NAME}' is not v<major>.<minor>.<patch>"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::${GITHUB_REF_NAME} is not on main"
+            exit 1
+          fi
+          PACKAGE="$(jq -r .version plugin/package.json)"
+          if [ "${VERSION}" != "${PACKAGE}" ]; then
+            echo "::error::${GITHUB_REF_NAME} does not match plugin/package.json (${PACKAGE})"
+            exit 1
+          fi
+          # Every pinned image reference in the docs and distribution files.
+          OTHER="$(grep -rhoE "${IMAGE_NAME#ghcr.io/*/}:[0-9][0-9A-Za-z.-]*" README.md distribution | sort -u | grep -v ":${VERSION}\$" || true)"
+          if [ -n "${OTHER}" ]; then
+            echo "::error::README.md or distribution/ pin another version: ${OTHER}"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+  ci:
+    name: CI
+    needs: version
+    uses: ./.github/workflows/ci.yaml
+
+  image:
+    name: Image
+    needs: [version, ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The final stage only copies files (no RUN): no emulation is needed.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Containerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            PLUGIN_VERSION=${{ needs.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+          push: true
+          provenance: false
+          # No floating tags: Headlamp's initContainer pins a version.
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.version.outputs.version }}
+          cache-from: type=gha,scope=image
+
+      - name: Summary
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "### Image"
+            echo
+            echo "\`${IMAGE_NAME}:${VERSION}\`"
+            echo
+            echo "Digest: \`${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: GitHub Release and Artifact Hub metadata
+    needs: [version, ci, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+
+      - name: Build and package the plugin
+        working-directory: plugin
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          npm run package
+
+      - name: Checksum and Artifact Hub metadata
+        run: |
+          TARBALL="plugin/${PACKAGE_NAME}-${VERSION}.tar.gz"
+          META="artifacthub/${PACKAGE_NAME}/${VERSION}"
+          .github/scripts/artifacthub-pkg.sh "${VERSION}" "${TARBALL}" "${META}"
+          cp README.md "${META}/README.md"
+          (cd plugin && sha256sum "${PACKAGE_NAME}-${VERSION}.tar.gz" > "${PACKAGE_NAME}-${VERSION}.tar.gz.sha256")
+          cat "${META}/artifacthub-pkg.yml"
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "plugin/${PACKAGE_NAME}-${VERSION}.tar.gz" \
+            "plugin/${PACKAGE_NAME}-${VERSION}.tar.gz.sha256" \
+            "artifacthub/${PACKAGE_NAME}/${VERSION}/artifacthub-pkg.yml" \
+            --verify-tag --generate-notes --title "Hangar ${VERSION}" \
+            --notes "Image: \`${IMAGE_NAME}:${VERSION}\` (linux/amd64, linux/arm64)."
+
+      - name: Commit the Artifact Hub metadata to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+          git add "artifacthub/${PACKAGE_NAME}/${VERSION}"
+          git commit -m "chore(release): Artifact Hub metadata for ${GITHUB_REF_NAME}"
+          git push origin main

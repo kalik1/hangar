@@ -1,0 +1,9 @@
+# Artifact Hub repository metadata for this folder (repository kind
+# "Headlamp plugins", URL https://github.com/kalik1/hangar/artifacthub).
+# Each release adds hangar-headlamp-plugin/<version>/artifacthub-pkg.yml here
+# (.github/workflows/release.yaml).
+#
+# After registering the repository on artifacthub.io, its owner can claim it
+# (verified publisher) by setting the repository ID shown there:
+#
+# repositoryID: <the ID from artifacthub.io>

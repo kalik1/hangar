@@ -1,0 +1,181 @@
+# Roles for Hangar users other than cluster-admin. Bind them per folder
+# (namespace) with a RoleBinding, or cluster-wide with a ClusterRoleBinding.
+#
+#   hangar-viewer       sees VMs, hosts, datastores, networks, the library, events
+#   hangar-vm-operator  + power operations, consoles, migrations, snapshots
+#   hangar-vm-admin     + creates, edits, clones and deletes VMs, disks, images
+#
+# They complement KubeVirt's and CDI's own aggregated roles
+# (kubevirt.io:view/edit/admin, cdi.kubevirt.io:view/edit/admin).
+# Host maintenance mode (cordon a node) and creating folders (namespaces)
+# need cluster-level rights that these roles do not give.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hangar-viewer
+  labels: {hangar.magesgate.com/role: viewer}
+rules:
+  - apiGroups: [kubevirt.io]
+    resources: [virtualmachines, virtualmachineinstances, virtualmachineinstancemigrations, kubevirts]
+    verbs: [get, list, watch]
+  - apiGroups: [subresources.kubevirt.io]
+    resources: [virtualmachineinstances/guestosinfo, virtualmachineinstances/userlist, virtualmachineinstances/filesystemlist]
+    verbs: [get]
+  - apiGroups: [snapshot.kubevirt.io, clone.kubevirt.io, export.kubevirt.io, pool.kubevirt.io]
+    resources: ['*']
+    verbs: [get, list, watch]
+  - apiGroups: [instancetype.kubevirt.io]
+    resources: [virtualmachineclusterinstancetypes, virtualmachineclusterpreferences, virtualmachineinstancetypes, virtualmachinepreferences]
+    verbs: [get, list, watch]
+  - apiGroups: [cdi.kubevirt.io]
+    resources: [datavolumes, datasources, dataimportcrons, storageprofiles, cdiconfigs]
+    verbs: [get, list, watch]
+  - apiGroups: [k8s.cni.cncf.io]
+    resources: [network-attachment-definitions]
+    verbs: [get, list, watch]
+  - apiGroups: [nmstate.io]
+    resources: [nodenetworkstates]
+    verbs: [get, list, watch]
+  - apiGroups: [snapshot.storage.k8s.io]
+    resources: [volumesnapshotclasses]
+    verbs: [get, list, watch]
+  - apiGroups: ['']
+    resources: [nodes, namespaces, persistentvolumeclaims, pods, events]
+    verbs: [get, list, watch]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses, csistoragecapacities]
+    verbs: [get, list, watch]
+  - apiGroups: [metrics.k8s.io]
+    resources: [pods, nodes]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hangar-vm-operator
+  labels: {hangar.magesgate.com/role: operator}
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels: {hangar.magesgate.com/role: viewer}
+    - matchLabels: {hangar.magesgate.com/part: operator}
+rules: []
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hangar-vm-operator-rules
+  labels: {hangar.magesgate.com/part: operator}
+rules:
+  - apiGroups: [subresources.kubevirt.io]
+    resources:
+      - virtualmachines/start
+      - virtualmachines/stop
+      - virtualmachines/restart
+      - virtualmachines/migrate
+      - virtualmachineinstances/pause
+      - virtualmachineinstances/unpause
+      - virtualmachineinstances/reset
+      - virtualmachineinstances/softreboot
+      - virtualmachineinstances/vnc
+      - virtualmachineinstances/vnc/screenshot
+      - virtualmachineinstances/console
+    verbs: [get, update]
+  - apiGroups: [kubevirt.io]
+    resources: [virtualmachineinstancemigrations]
+    verbs: [create, delete]
+  - apiGroups: [snapshot.kubevirt.io]
+    resources: [virtualmachinesnapshots, virtualmachinerestores]
+    verbs: [create, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hangar-vm-admin
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels: {hangar.magesgate.com/role: viewer}
+    - matchLabels: {hangar.magesgate.com/part: operator}
+    - matchLabels: {hangar.magesgate.com/part: admin}
+rules: []
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hangar-vm-admin-rules
+  labels: {hangar.magesgate.com/part: admin}
+rules:
+  - apiGroups: [kubevirt.io]
+    resources: [virtualmachines]
+    verbs: [create, update, patch, delete]
+  - apiGroups: [clone.kubevirt.io, export.kubevirt.io, pool.kubevirt.io]
+    resources: ['*']
+    verbs: [create, update, patch, delete]
+  - apiGroups: [subresources.kubevirt.io]
+    resources: [virtualmachineinstances/addvolume, virtualmachineinstances/removevolume]
+    verbs: [update]
+  - apiGroups: [cdi.kubevirt.io]
+    resources: [datavolumes, datavolumes/source]
+    verbs: [create, update, patch, delete]
+  - apiGroups: [upload.cdi.kubevirt.io]
+    resources: [uploadtokenrequests]
+    verbs: [create]
+  - apiGroups: ['']
+    resources: [persistentvolumeclaims]
+    verbs: [create, update, patch, delete]
+  - apiGroups: [k8s.cni.cncf.io]
+    resources: [network-attachment-definitions]
+    verbs: [create, update, patch, delete]
+---
+# Host hardware and device passthrough (host > Hardware, Hosts > Device
+# mappings). Bind it cluster-wide to the people who decide which host
+# devices VMs may use; it is not part of hangar-vm-admin on purpose.
+# Reading the inventories is pods/proxy in hangar-system (RoleBinding below
+# grants it through this ClusterRole); giving devices writes the agent's
+# ConfigMap there, KubeVirt's device mappings (the KubeVirt CR) and
+# restarts KubeVirt's agent on a host (virt-handler pods); host disks
+# create PersistentVolumes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hangar-hardware-admin
+rules:
+  - apiGroups: [kubevirt.io]
+    resources: [kubevirts]
+    verbs: [get, list, watch, update, patch]
+  - apiGroups: ['']
+    resources: [persistentvolumes]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: ['']
+    resources: [nodes]
+    verbs: [get, list, watch]
+---
+# Namespaced part, in hangar-system: inventories and the desired state.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hangar-hardware-admin
+  namespace: hangar-system
+rules:
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [get, list, watch, patch]
+  - apiGroups: ['']
+    resources: [pods/proxy]
+    verbs: [get]
+  - apiGroups: ['']
+    resources: [configmaps]
+    verbs: [get, list, watch, create, update, patch]
+---
+# In KubeVirt's namespace: restart virt-handler on a host after its devices change.
+# KubeVirt's namespace is `kubevirt` with the KubeVirt operator; change it if
+# yours differs (e.g. `kubevirt-hyperconverged` with HCO).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hangar-reload-devices
+  namespace: kubevirt
+rules:
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [get, list, delete]
+# Bind these three (ClusterRoleBinding + two RoleBindings) to the same subjects.

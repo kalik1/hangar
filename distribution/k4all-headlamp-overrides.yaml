@@ -1,0 +1,43 @@
+# Hangar on a k4all cluster: ClusterConfig componentOverrides for the
+# headlamp component. Helm lists replace, they do not merge, so the k4all
+# plugin's initContainer, volume and mount are repeated here: keep them in
+# step with the k4all release (ghcr.io/gpillon/k4all-headlamp-plugin tag).
+#
+# This is the k4all integration (https://github.com/gpillon/k4all), for
+# k4all releases that do not install Hangar themselves. On any other
+# cluster use headlamp-values.yaml.
+#
+#   kubectl patch clusterconfig k4all-cluster-config --type merge \
+#     --patch-file k4all-headlamp-overrides.yaml
+spec:
+  componentOverrides:
+    headlamp:
+      values:
+        initContainers:
+          - name: k4all-plugin
+            image: ghcr.io/gpillon/k4all-headlamp-plugin:0.1.2
+            imagePullPolicy: IfNotPresent
+            command: [sh, -c, "cp -R /plugins/k4all-headlamp-plugin/. /k4all-plugin/"]
+            resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}
+            securityContext: &sc
+              runAsNonRoot: true
+              runAsUser: 100
+              runAsGroup: 101
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+              seccompProfile: {type: RuntimeDefault}
+            volumeMounts: [{name: k4all-plugin, mountPath: /k4all-plugin}]
+          - name: hangar-plugin
+            image: ghcr.io/kalik1/hangar-headlamp-plugin:0.1.0
+            imagePullPolicy: IfNotPresent
+            command: [sh, -c, "cp -R /plugins/hangar-headlamp-plugin/. /hangar-plugin/"]
+            resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}
+            securityContext: *sc
+            volumeMounts: [{name: hangar-plugin, mountPath: /hangar-plugin}]
+        volumes:
+          - {name: k4all-plugin, emptyDir: {sizeLimit: 16Mi}}
+          - {name: hangar-plugin, emptyDir: {sizeLimit: 16Mi}}
+        volumeMounts:
+          - {name: k4all-plugin, mountPath: /headlamp/plugins/k4all-headlamp-plugin, readOnly: true}
+          - {name: hangar-plugin, mountPath: /headlamp/plugins/hangar-headlamp-plugin, readOnly: true}

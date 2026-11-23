@@ -1,0 +1,31 @@
+# Hangar in Headlamp's Helm chart (https://headlamp.dev, chart 0.46 or newer):
+# an initContainer copies the plugin from its image into an emptyDir that
+# Headlamp reads as /headlamp/plugins/hangar-headlamp-plugin.
+#
+#   helm upgrade --install headlamp headlamp/headlamp --namespace headlamp \
+#     --reuse-values -f distribution/headlamp-values.yaml
+#
+# Helm replaces lists instead of merging them: if your values already have
+# initContainers, volumes or volumeMounts (other plugins, for example), add
+# these entries to your lists instead of passing this file as it is.
+config:
+  pluginsDir: /headlamp/plugins
+initContainers:
+  - name: hangar-plugin
+    image: ghcr.io/kalik1/hangar-headlamp-plugin:0.1.0
+    imagePullPolicy: IfNotPresent
+    command: [sh, -c, "cp -R /plugins/hangar-headlamp-plugin/. /hangar-plugin/"]
+    resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 100
+      runAsGroup: 101
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities: {drop: [ALL]}
+      seccompProfile: {type: RuntimeDefault}
+    volumeMounts: [{name: hangar-plugin, mountPath: /hangar-plugin}]
+volumes:
+  - {name: hangar-plugin, emptyDir: {sizeLimit: 16Mi}}
+volumeMounts:
+  - {name: hangar-plugin, mountPath: /headlamp/plugins/hangar-headlamp-plugin, readOnly: true}
