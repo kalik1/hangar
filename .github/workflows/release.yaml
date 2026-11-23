@@ -5,7 +5,9 @@ name: Release
 # 2. the image ghcr.io/<owner>/hangar-headlamp-plugin:<version> for amd64
 #    and arm64;
 # 3. a GitHub Release with the packaged plugin (headlamp-plugin package),
-#    its sha256 and its artifacthub-pkg.yml;
+#    its sha256, its artifacthub-pkg.yml, and the cluster objects for
+#    distributions (hangar-cluster.yaml, hangar-node-agent.yaml:
+#    .github/scripts/cluster-bundles.sh);
 # 4. the Artifact Hub metadata committed to main under
 #    artifacthub/hangar-headlamp-plugin/<version>/.
 
@@ -159,6 +161,9 @@ jobs:
           (cd plugin && sha256sum "${PACKAGE_NAME}-${VERSION}.tar.gz" > "${PACKAGE_NAME}-${VERSION}.tar.gz.sha256")
           cat "${META}/artifacthub-pkg.yml"
 
+      - name: Cluster bundles
+        run: .github/scripts/cluster-bundles.sh "${RUNNER_TEMP}/bundles"
+
       - name: GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -167,6 +172,8 @@ jobs:
             "plugin/${PACKAGE_NAME}-${VERSION}.tar.gz" \
             "plugin/${PACKAGE_NAME}-${VERSION}.tar.gz.sha256" \
             "artifacthub/${PACKAGE_NAME}/${VERSION}/artifacthub-pkg.yml" \
+            "${RUNNER_TEMP}/bundles/hangar-cluster.yaml" \
+            "${RUNNER_TEMP}/bundles/hangar-node-agent.yaml" \
             --verify-tag --generate-notes --title "Hangar ${VERSION}" \
             --notes "Image: \`${IMAGE_NAME}:${VERSION}\` (linux/amd64, linux/arm64)."
 

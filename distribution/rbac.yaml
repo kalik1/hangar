@@ -129,11 +129,11 @@ rules:
 # Host hardware and device passthrough (host > Hardware, Hosts > Device
 # mappings). Bind it cluster-wide to the people who decide which host
 # devices VMs may use; it is not part of hangar-vm-admin on purpose.
-# Reading the inventories is pods/proxy in hangar-system (RoleBinding below
-# grants it through this ClusterRole); giving devices writes the agent's
-# ConfigMap there, KubeVirt's device mappings (the KubeVirt CR) and
-# restarts KubeVirt's agent on a host (virt-handler pods); host disks
-# create PersistentVolumes.
+# Giving devices writes KubeVirt's device mappings (the KubeVirt CR) and
+# restarts KubeVirt's agent on a host (virt-handler pods, Role below);
+# host disks create PersistentVolumes. Reading the inventories (pods/proxy)
+# and writing the agent's ConfigMap is the Role hangar-hardware-admin in
+# hangar-system, which comes with the node agent (node-agent/rbac.yaml).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -149,23 +149,6 @@ rules:
     resources: [nodes]
     verbs: [get, list, watch]
 ---
-# Namespaced part, in hangar-system: inventories and the desired state.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: hangar-hardware-admin
-  namespace: hangar-system
-rules:
-  - apiGroups: ['']
-    resources: [pods]
-    verbs: [get, list, watch, patch]
-  - apiGroups: ['']
-    resources: [pods/proxy]
-    verbs: [get]
-  - apiGroups: ['']
-    resources: [configmaps]
-    verbs: [get, list, watch, create, update, patch]
----
 # In KubeVirt's namespace: restart virt-handler on a host after its devices change.
 # KubeVirt's namespace is `kubevirt` with the KubeVirt operator; change it if
 # yours differs (e.g. `kubevirt-hyperconverged` with HCO).
@@ -178,4 +161,5 @@ rules:
   - apiGroups: ['']
     resources: [pods]
     verbs: [get, list, delete]
-# Bind these three (ClusterRoleBinding + two RoleBindings) to the same subjects.
+# Bind the ClusterRole hangar-hardware-admin, this Role and the node agent's
+# Role hangar-hardware-admin in hangar-system to the same subjects.

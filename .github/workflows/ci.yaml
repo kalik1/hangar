@@ -1,8 +1,8 @@
 name: CI
 
 # Every pull request and every push to main: lint, type check, unit tests,
-# build of the plugin, and a build of the image for amd64 and arm64 (not
-# pushed). The release workflow runs the same checks before a release.
+# build of the plugin, the cluster bundles, and a build of the image for
+# amd64 and arm64 (not pushed). The release workflow runs the same checks before a release.
 
 on:
   push:
@@ -63,6 +63,20 @@ jobs:
             plugin/dist/main.js
             plugin/package.json
           if-no-files-found: error
+
+  bundles:
+    name: Cluster bundles
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The files the release attaches for distributions (k4all): the
+      # runner's kubectl builds the node agent with kustomize.
+      - name: Build hangar-cluster.yaml and hangar-node-agent.yaml
+        run: .github/scripts/cluster-bundles.sh "${RUNNER_TEMP}/bundles"
 
   image:
     name: Image builds (amd64, arm64)

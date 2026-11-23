@@ -1,0 +1,23 @@
+# Host devices, the node agent's part of hangar-hardware-admin (see
+# ../rbac.yaml for the cluster-wide part): read the inventories the agent
+# pods serve (pods/proxy) and write their desired state, the ConfigMap
+# hangar-passthrough. Bind it with a RoleBinding in hangar-system to the
+# subjects of the ClusterRole hangar-hardware-admin. Here, not in
+# ../rbac.yaml, because it lives in the agent's namespace: the roles apply
+# without the agent, and removing the agent takes it along.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hangar-hardware-admin
+  labels:
+    app.kubernetes.io/part-of: hangar
+rules:
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [get, list, watch, patch]
+  - apiGroups: ['']
+    resources: [pods/proxy]
+    verbs: [get]
+  - apiGroups: ['']
+    resources: [configmaps]
+    verbs: [get, list, watch, create, update, patch]

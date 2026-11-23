@@ -4,8 +4,9 @@
 # step with the k4all release (ghcr.io/gpillon/k4all-headlamp-plugin tag).
 #
 # This is the k4all integration (https://github.com/gpillon/k4all), for
-# k4all releases that do not install Hangar themselves. On any other
-# cluster use headlamp-values.yaml.
+# k4all releases before v2.7.0, which do not install Hangar themselves
+# (v2.7.0 and later do, with virtualization on). On any other cluster use
+# headlamp-values.yaml.
 #
 #   kubectl patch clusterconfig k4all-cluster-config --type merge \
 #     --patch-file k4all-headlamp-overrides.yaml

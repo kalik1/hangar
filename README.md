@@ -124,7 +124,9 @@ kubectl apply -f distribution/rbac.yaml
 ```
 
 The `hangar-reload-devices` Role lives in KubeVirt's namespace (`kubevirt`
-in the file): change it if KubeVirt runs elsewhere.
+in the file): change it if KubeVirt runs elsewhere. The part of
+`hangar-hardware-admin` in `hangar-system` comes with the node agent
+(below).
 
 ### Host devices (passthrough)
 
@@ -145,7 +147,9 @@ Hosts need the IOMMU on: VT-d/AMD-Vi in the firmware and
 `intel_iommu=on iommu=pt` (or `amd_iommu=on iommu=pt`) on the kernel
 command line. Hangar turns on KubeVirt's `HostDevices` feature gate with
 the first device mapping. People who manage devices need
-`hangar-hardware-admin` (see `distribution/rbac.yaml`).
+`hangar-hardware-admin`: the ClusterRole of `distribution/rbac.yaml` and
+the Role of the same name in `hangar-system`
+(`distribution/node-agent/rbac.yaml`), bound to the same subjects.
 
 Undo: give the devices back to the host from each host's Hardware tab,
 delete the mappings, then `kubectl delete -k distribution/node-agent` and
@@ -217,12 +221,29 @@ before you delete; Hangar itself offers no folder delete. CDI's temporary
 claims (labelled `cdi.kubevirt.io/OwnedByUID`) copy the label and are left
 deletable by the policy.
 
+### Cluster objects for distributions
+
+Each [GitHub Release](https://github.com/kalik1/hangar/releases) also
+carries the cluster objects of that version, for distributions that
+install them next to the plugin image:
+
+- `hangar-cluster.yaml`: the roles and the delete protection
+  (`distribution/rbac.yaml` and `distribution/protection-policy.yaml`);
+- `hangar-node-agent.yaml`: the node agent (`distribution/node-agent`,
+  built with kustomize), privileged, in its own file so a distribution can
+  leave it out.
+
 ### On k4all
 
-[k4all](https://github.com/gpillon/k4all) clusters configure Headlamp
-through their ClusterConfig, so the plugin survives k4all upgrades:
-[`distribution/k4all-headlamp-overrides.yaml`](https://github.com/kalik1/hangar/blob/main/distribution/k4all-headlamp-overrides.yaml)
-(for k4all releases that do not install Hangar themselves).
+[k4all](https://github.com/gpillon/k4all) v2.7.0 and later install Hangar
+with virtualization on: the plugin in Headlamp, the roles, the delete
+protection and the node agent, from this repository's releases. Nothing to
+do; a ClusterConfig override from the file below can stay (k4all keeps its
+own pin of the plugins it ships) or go.
+
+Older k4all releases configure Headlamp through their ClusterConfig, so the
+plugin survives k4all upgrades:
+[`distribution/k4all-headlamp-overrides.yaml`](https://github.com/kalik1/hangar/blob/main/distribution/k4all-headlamp-overrides.yaml).
 
 ```bash
 kubectl patch clusterconfig k4all-cluster-config --type merge \
@@ -257,8 +278,9 @@ configuration; plain `vitest run` lacks it).
 2. Tag main `v<x.y.z>` and push the tag. The
    [release workflow](https://github.com/kalik1/hangar/blob/main/.github/workflows/release.yaml) checks that the tag
    matches the files, runs CI, pushes the image for amd64 and arm64,
-   publishes a GitHub Release with the tarball, its sha256 and its
-   `artifacthub-pkg.yml`, and commits that metadata to
+   publishes a GitHub Release with the tarball, its sha256, its
+   `artifacthub-pkg.yml` and the cluster objects (`hangar-cluster.yaml`,
+   `hangar-node-agent.yaml`), and commits that metadata to
    `artifacthub/hangar-headlamp-plugin/<x.y.z>/` on main for
    [Artifact Hub](https://artifacthub.io) (repository kind *Headlamp
    plugins*, URL `https://github.com/kalik1/hangar/artifacthub`).

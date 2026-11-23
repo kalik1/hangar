@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: hangar-system
 resources:
   - node-agent.yaml
+  - rbac.yaml
 configMapGenerator:
   - name: hangar-node-agent-scripts
     files:
