@@ -493,6 +493,15 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
   a newer KubeVirt shows "maturity unknown" until the table gains it.
 - vGPU display options apply to mediated devices only and were not tried on
   a real vGPU.
+- KubeVirt v1.7 draws a VM's VSOCK CID from the whole 32-bit range while its
+  VMI schema accepts int32 only: on recent Kubernetes about one power-on in
+  two of a VSOCK VM stays in Starting (virt-controller cannot write the
+  status). Configure → Devices says so; powering the VM off and on again
+  draws a new CID.
+- A VM with shared folders that is stuck before running cannot be powered
+  off with a grace period (KubeVirt's VMI update webhook refuses the patch:
+  "volume … doesn't have a matching disk"); setting its power policy to Off
+  stops it.
 
 ## 8. Later
 
