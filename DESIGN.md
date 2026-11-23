@@ -507,9 +507,9 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
   KubeVirt v1.7 copies it to a new disk for the target host (tested).
 - CPU and memory hot-add need the VM to move live (KubeVirt migrates it to
   resize it): VMs on single-host disks or with host devices grow at their
-  next restart. Only
-  sockets can be added; memory needs at least 1 GiB, goes in 2 MiB blocks,
-  and cannot go below the size at power-on while running.
+  next restart. Only sockets can be added; memory needs at least 1 GiB,
+  goes in 2 MiB blocks, and cannot go below the size at power-on while
+  running.
 - Feature gate maturity is known per KubeVirt minor version (v1.7 today);
   a newer KubeVirt shows "maturity unknown" until the table gains it.
 - vGPU display options apply to mediated devices only and were not tried on
