@@ -417,7 +417,8 @@ function Protection({ d }: { d: HangarData }) {
   const k8s = useK8s();
   const { state, recheck } = useProtectionPolicy();
   const vms = d.vms.filter(isProtected);
-  const disks = d.pvcs.filter(isProtected);
+  // CDI's temporary claims copy the label; they are not the VMs' disks.
+  const disks = d.pvcs.filter(p => isProtected(p) && !p.metadata.labels?.['cdi.kubevirt.io/OwnedByUID']);
   const status: { tone: LedTone; title: string; text: React.ReactNode } =
     state === 'installed'
       ? { tone: 'on', title: 'Installed', text: 'Protected VMs and their disks cannot be deleted, from Hangar, kubectl or anything else, until protection is turned off.' }

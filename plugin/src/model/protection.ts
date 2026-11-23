@@ -9,7 +9,8 @@
  * Disks are the VM's disk devices (not CD/DVD media, which are per-VM copies
  * of library ISOs, nor config volumes). New disks of a protected VM get the
  * label through their DataVolume template (CDI copies DataVolume labels to
- * the PVC it creates).
+ * the PVC it creates, and to its temporary claims, which the policy leaves
+ * deletable: they carry cdi.kubevirt.io/OwnedByUID).
  */
 
 import { clone } from './edit';

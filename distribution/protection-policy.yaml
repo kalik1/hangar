@@ -30,8 +30,13 @@ spec:
         operations: [DELETE]
         resources: [persistentvolumeclaims]
     # On DELETE the selector is matched against the object being deleted.
+    # CDI's temporary claims (labelled cdi.kubevirt.io/OwnedByUID: prime-*,
+    # tmp-pvc-* of a clone) copy the disk's labels and must stay deletable,
+    # or CDI cannot clean up after populating a protected disk.
     objectSelector:
       matchLabels: {hangar.magesgate.com/protected: 'true'}
+      matchExpressions:
+        - {key: cdi.kubevirt.io/OwnedByUID, operator: DoesNotExist}
   validations:
     - expression: >-
         !has(oldObject.metadata.labels) ||
