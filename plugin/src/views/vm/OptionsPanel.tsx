@@ -376,7 +376,10 @@ export function OptionsPanel({ vm }: { vm: Obj }) {
         <Help>Devices and settings tuned for the guest OS (bus types, clock, Hyper-V for Windows). Applies at the next power-on.</Help>
       </Row>
       <Box sx={{ pt: 1, borderTop: `1px solid ${t.rule}` }}>
-        <NotInKubevirt>Start and shutdown order and delays between VMs are not in KubeVirt: each VM has its own power policy (Power and availability).</NotInKubevirt>
+        <NotInKubevirt>
+          Not in KubeVirt: start and shutdown order and delays between VMs (each VM has its own power policy), KVM on or off per VM (always on), hibernation to a
+          state disk (suspend keeps the VM in memory).
+        </NotInKubevirt>
       </Box>
       {k8s && (
         <Box sx={{ mt: 1, display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
