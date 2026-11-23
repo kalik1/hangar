@@ -26,7 +26,8 @@ import { NOT_ALLOWED, useVmPerms } from '../../api/permissions';
 import { setVmProtection, useProtectionPolicy } from '../../api/protection';
 import { isProtected, PROTECTED_LABEL } from '../../model/protection';
 import { Obj } from '../../model/types';
-import { key, powerState } from '../../model/vm';
+import { formatBytes, parseQuantity } from '../../model/units';
+import { hardware, key, powerState } from '../../model/vm';
 import * as O from '../../model/vmoptions';
 import { hrefFor } from '../../shell/nav';
 import { useK8s } from '../../shell/settings';
@@ -254,6 +255,36 @@ function ProtectionRow({ vm }: { vm: Obj }) {
   );
 }
 
+/** A preference by its display name, with its name (several share a display name: desktop, DPDK…). */
+function PrefLabel({ p, unmet }: { p: Obj; unmet?: string }) {
+  const display = p.metadata.annotations?.['openshift.io/display-name'];
+  return (
+    <Box component="span" sx={{ display: 'inline-flex', gap: 1, alignItems: 'baseline' }}>
+      {display ?? p.metadata.name}
+      {display && (
+        <Box component="span" sx={{ fontSize: 12, color: 'text.secondary' }}>
+          {p.metadata.name}
+        </Box>
+      )}
+      {unmet && (
+        <Box component="span" sx={{ fontSize: 12, color: '#B7791F' }}>
+          {unmet}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+/** What a preference requires that the VM lacks (KubeVirt refuses the change otherwise). */
+function prefUnmet(p: Obj, vcpus: number, memBytes: number): string | undefined {
+  const r = p.spec?.requirements ?? {};
+  const out: string[] = [];
+  if (r.cpu?.guest && vcpus < r.cpu.guest) out.push(`${r.cpu.guest} vCPU`);
+  const m = parseQuantity(r.memory?.guest);
+  if (isFinite(m) && memBytes < m) out.push(formatBytes(m));
+  return out.length ? `needs ${out.join(' and ')}` : undefined;
+}
+
 export function OptionsPanel({ vm }: { vm: Obj }) {
   const d = useHangar();
   const t = useTokens();
@@ -261,6 +292,7 @@ export function OptionsPanel({ vm }: { vm: Obj }) {
   const folder = useFolderFlavors();
   const vmi = d.idx.vmi.get(key(vm));
   const running = powerState(vm, vmi).kind !== 'off';
+  const hw = hardware(vm, vmi, d.instancetypes);
   const paused = O.startPaused(vm);
   const clock = O.clockOf(vm);
   const tablet = O.tabletOf(vm);
@@ -327,14 +359,14 @@ export function OptionsPanel({ vm }: { vm: Obj }) {
           <MenuItem value="">None (KubeVirt defaults)</MenuItem>
           {nsPrefs.length > 0 && <ListSubheader>This folder</ListSubheader>}
           {nsPrefs.map(p => (
-            <MenuItem key={`ns/${p.metadata.name}`} value={`${KIND_PREF_NS}/${p.metadata.name}`}>
-              {p.metadata.annotations?.['openshift.io/display-name'] ?? p.metadata.name}
+            <MenuItem key={`ns/${p.metadata.name}`} value={`${KIND_PREF_NS}/${p.metadata.name}`} disabled={!!prefUnmet(p, hw.vcpus, hw.memoryBytes)}>
+              <PrefLabel p={p} unmet={prefUnmet(p, hw.vcpus, hw.memoryBytes)} />
             </MenuItem>
           ))}
           <ListSubheader>Datacenter</ListSubheader>
           {d.preferences.map(p => (
-            <MenuItem key={p.metadata.name} value={`${KIND_PREF}/${p.metadata.name}`}>
-              {p.metadata.annotations?.['openshift.io/display-name'] ?? p.metadata.name}
+            <MenuItem key={p.metadata.name} value={`${KIND_PREF}/${p.metadata.name}`} disabled={!!prefUnmet(p, hw.vcpus, hw.memoryBytes)}>
+              <PrefLabel p={p} unmet={prefUnmet(p, hw.vcpus, hw.memoryBytes)} />
             </MenuItem>
           ))}
           {pref && !d.preferences.some(p => p.metadata.name === pref.name) && !nsPrefs.some(p => p.metadata.name === pref.name) && (

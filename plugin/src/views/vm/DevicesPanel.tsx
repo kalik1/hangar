@@ -14,6 +14,7 @@ import TextField from '@mui/material/TextField';
 import React from 'react';
 import { useHangar } from '../../api/data';
 import { useGate } from '../../api/gates';
+import { kubevirtVersion } from '../../model/gates';
 import { Obj } from '../../model/types';
 import { key, powerState } from '../../model/vm';
 import * as O from '../../model/vmoptions';
@@ -150,6 +151,11 @@ export function DevicesPanel({ vm }: { vm: Obj }) {
       <Row label="VSOCK" align="flex-start" action={flagSwitch('VSOCK', o.vsock, vsock, v => set(v ? 'Add VSOCK' : 'Remove VSOCK', { vsock: v }))}>
         {o.vsock ? 'On: host–guest sockets without a network' : 'Off'}
         {vsock.on === false && !o.vsock ? <GateHint gate="VSOCK" sx={{ mt: 0.5 }} /> : <Help>For agents that talk to the host over AF_VSOCK; KubeVirt gives the VM a context ID (CID).</Help>}
+        {o.vsock && /^v1\.7\./.test(kubevirtVersion(d.kubevirt) ?? '') && (
+          <Help tone="warn">
+            KubeVirt v1.7 draws the CID from the whole 32-bit range but its API accepts only half of it: about one power-on in two then stays in Starting. Power the VM off and on again.
+          </Help>
+        )}
       </Row>
       <Row label="Host metrics" align="flex-start" action={flagSwitch('Downward metrics', o.downwardMetrics, metrics, v => set(v ? 'Add host metrics' : 'Remove host metrics', { downwardMetrics: v }))}>
         {o.downwardMetrics ? 'On: the guest reads host metrics' : 'Off'}

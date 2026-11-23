@@ -145,15 +145,19 @@ function MaturityTag({ m }: { m: GateState['maturity'] }) {
 
 async function toggleGate(d: HangarData, kv: Obj, r: GateRow, on: boolean, k4all: boolean) {
   const { removed } = nextGates(listedGates(kv), r.name, on);
-  const users = on ? [] : vmsUsingGate(d.vms, r.name);
+  // VMs that lose a feature: this gate's when turning it off, the rival's when turning this one on.
+  const losing = on ? removed : [r.name];
+  const users = losing.flatMap(g => vmsUsingGate(d.vms, g));
   const what = r.feature?.unlocks ?? r.name;
   const ok = await confirm({
     title: `${on ? 'Turn on' : 'Turn off'} ${r.name}?`,
     body: (
       <>
         <p>
-          {on ? 'Turns on' : 'Turns off'} <b>{what.charAt(0).toLowerCase() + what.slice(1)}</b> for the whole datacenter: Hangar{' '}
-          {on ? 'adds' : 'removes'} <code>{r.name}</code> {on ? 'to' : 'from'} the feature gates of the KubeVirt resource; the other gates stay as they are.
+          <b>{what}</b>: {on ? 'on' : 'off'} for the whole datacenter.
+        </p>
+        <p>
+          Hangar {on ? 'adds' : 'removes'} <code>{r.name}</code> {on ? 'to' : 'from'} the feature gates of the KubeVirt resource; the other gates stay as they are.
         </p>
         {on && r.maturity === 'Alpha' && (
           <p>
@@ -169,7 +173,7 @@ async function toggleGate(d: HangarData, kv: Obj, r: GateRow, on: boolean, k4all
         )}
         {users.length > 0 && (
           <p>
-            {users.length} VM{users.length > 1 ? 's use' : ' uses'} it ({users.slice(0, 5).map(v => v.metadata.name).join(', ')}
+            {users.length} VM{users.length > 1 ? 's use' : ' uses'} {on ? removed.join(', ') : 'it'} ({users.slice(0, 5).map(v => v.metadata.name).join(', ')}
             {users.length > 5 ? ', …' : ''}): running ones keep it until they power off, then KubeVirt refuses to start them until it is back on.
           </p>
         )}
@@ -177,7 +181,7 @@ async function toggleGate(d: HangarData, kv: Obj, r: GateRow, on: boolean, k4all
       </>
     ),
     confirm: on ? 'Turn on' : 'Turn off',
-    danger: !on && users.length > 0,
+    danger: users.length > 0,
   });
   if (ok) quiet(setFeatureGate(kv, r.name, on));
 }
