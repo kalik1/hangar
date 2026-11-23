@@ -27,6 +27,7 @@ import { kpost } from '../api/client';
 import { prepareClipboard } from '../api/clipboard';
 import { HangarData, useHangar } from '../api/data';
 import { useClusterDns } from '../api/dns';
+import { useNetFacts } from '../api/podnet';
 import { useProtectionPolicy } from '../api/protection';
 import { datastores } from '../model/capacity';
 import { setClipboardAnnotation, sidecarGateOn, sidecarImage } from '../model/clipboard';
@@ -34,12 +35,13 @@ import { DNS_POLICIES, dnsProblems, DnsSettings, hostSearchHint, isDefaultDns } 
 import { flavorFrom, KIND_CLUSTER, KIND_NS } from '../model/flavors';
 import { folders, L_FOLDER } from '../model/inventory';
 import { preferredDatastore } from '../model/placement';
+import { cidrConflicts, DEFAULT_VM_CIDR, freeVmCidr } from '../model/podnet';
 import { formatBytes, GiB, MiB, parseQuantity } from '../model/units';
 import { RUN_STRATEGIES } from '../model/vm';
 import { BootSource, buildVm, nameProblem, WizardDisk, WizardInput, WizardNic } from '../model/vmspec';
 import { hrefFor } from '../shell/nav';
 import { useK8s, useSettings } from '../shell/settings';
-import { KV } from '../ui/kit';
+import { K8sName,KV } from '../ui/kit';
 import { tabular } from '../ui/tokens';
 import { useTokens } from '../ui/useTokens';
 import { CpuModelSelect, FlavorPicker, useFlavorFamilies } from '../views/flavors/parts';
@@ -283,6 +285,9 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
   const [step, setStep] = React.useState(0);
   const [yaml, setYaml] = React.useState(false);
   const policy = useProtectionPolicy();
+  // A NAT range for pod-network adapters that overlaps none of the cluster's (k4all #72).
+  const netFacts = useNetFacts(d.nodes);
+  const vmCidr = netFacts ? freeVmCidr(netFacts) : null;
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -397,6 +402,7 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
       evictionStrategy: s.eviction || undefined,
       labels: tagMap(),
       templateAnnotations: s.clipboard ? setClipboardAnnotation({}, true, sidecarImage(d.kubevirt)) : undefined,
+      vmNetworkCidr: vmCidr ?? undefined,
       protected: s.protect && policy.state === 'installed',
       startPaused: s.startPaused,
       headless: s.headless,
@@ -759,6 +765,22 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
               </Box>
             </Box>
           </Field>
+          {k8s && s.nics.some(n => !n.network) && (
+            <Field label="NAT range" help="The network between the guest and its pod.">
+              <Box sx={{ fontSize: 14, pt: 1 }}>
+                {!netFacts ? 'Checking the cluster…' : vmCidr ?? DEFAULT_VM_CIDR} <K8sName>networks[].pod.vmNetworkCIDR</K8sName>
+                <Typography sx={{ fontSize: 12.5, color: t.muted, mt: 0.5 }}>
+                  {!netFacts
+                    ? ''
+                    : !vmCidr
+                    ? 'No free /24 found: KubeVirt default 10.0.2.0/24.'
+                    : vmCidr === DEFAULT_VM_CIDR
+                    ? "KubeVirt's default; no host pod network, service network or host address uses it."
+                    : `KubeVirt's default ${DEFAULT_VM_CIDR} is ${cidrConflicts(DEFAULT_VM_CIDR, netFacts).join(', ')}: the VM could not reach it.`}
+                </Typography>
+              </Box>
+            </Field>
+          )}
           {s.nics.some(n => !n.network) && (
             <Field label="DNS" help="What the pod network adapter gets by DHCP.">
               <Box sx={{ display: 'grid', gap: 1.5 }}>

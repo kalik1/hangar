@@ -315,3 +315,61 @@ export function reservationSummary(vm: Obj): string {
   const parts = [r.cpuRequest && `CPU ${r.cpuRequest} reserved`, r.cpuLimit && `CPU ≤ ${r.cpuLimit}`, r.memoryRequest && `memory ${r.memoryRequest} reserved`, r.memoryLimit && `memory ≤ ${r.memoryLimit}`].filter(Boolean);
   return parts.length ? parts.join(', ') : 'KubeVirt defaults';
 }
+
+/* ------------------------------------------------------------ machine type */
+
+export function MachineDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: () => void }) {
+  const t = useTokens();
+  const cm = O.clusterMachines(d.kubevirt, vm.spec?.template?.spec?.architecture || 'amd64');
+  const choices = O.machineChoices(d.kubevirt, d.nodes, vm.spec?.template?.spec?.architecture || 'amd64').filter(c => c.allowed);
+  const current = O.machineTypeOf(vm) ?? '';
+  const [type, setType] = React.useState(current);
+  const vmi = d.idx.vmi.get(key(vm));
+  const runningOn: string | undefined = vmi?.status?.machine?.type;
+  const total = d.nodes.length;
+  // A type no host offers, or KubeVirt does not accept, is still shown (the VM has it), not offered.
+  const inList = !type || choices.some(c => c.type === type);
+  return (
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth aria-labelledby="hangar-machine-title">
+      <DialogTitle id="hangar-machine-title" sx={{ fontSize: 18 }}>
+        Machine type of {vm.metadata.name}
+      </DialogTitle>
+      <DialogContent sx={{ display: 'grid', gap: 1.5, pt: '8px !important' }}>
+        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
+          The virtual chipset and its version. <b>q35</b> means the newest version the host offers when the VM powers on; a version keeps the VM on that
+          chipset across power-ons (some guests, such as Windows, notice a new one).
+        </Typography>
+        <TextField select size="small" label="Machine type" value={type} onChange={e => setType(e.target.value)} SelectProps={{ displayEmpty: true }} InputLabelProps={{ shrink: true }}>
+          <MenuItem value="">Datacenter default ({cm.default})</MenuItem>
+          {choices.map(c => (
+            <MenuItem key={c.type} value={c.type}>
+              <Box sx={{ display: 'flex', gap: 1, width: '100%', alignItems: 'baseline' }}>
+                <span>{c.type}</span>
+                {c.type === cm.default && <Box component="span" sx={{ fontSize: 12, color: t.muted }}>datacenter default</Box>}
+                <Box component="span" sx={{ flex: 1 }} />
+                <Box component="span" sx={{ fontSize: 12, color: c.hosts.length < total ? '#B7791F' : t.muted, ...tabular }}>
+                  {c.hosts.length === total ? 'every host' : `${c.hosts.length} of ${total} hosts`}
+                </Box>
+              </Box>
+            </MenuItem>
+          ))}
+          {!inList && <MenuItem value={type}>{type} (not offered by the hosts or not accepted)</MenuItem>}
+        </TextField>
+        <Typography sx={{ fontSize: 12.5, color: t.muted }}>
+          KubeVirt accepts {cm.emulated.join(', ')}
+          {cm.from === 'kubevirt' ? ' (its defaults: the KubeVirt resource sets none)' : ' (set in the KubeVirt resource)'}; a VM without a machine type gets {cm.default}.
+          {runningOn ? ` The running VM uses ${runningOn}.` : ''} A running VM keeps its machine type when it moves: KubeVirt moves it only to hosts that offer it.
+        </Typography>
+        <RestartNote show={!!vmi} />
+      </DialogContent>
+      <Actions
+        ok={type !== current}
+        onClose={onClose}
+        onSave={() => {
+          quiet(saveVm(vm, 'Change machine type', O.setMachineType(vm, type)));
+          onClose();
+        }}
+      />
+    </Dialog>
+  );
+}

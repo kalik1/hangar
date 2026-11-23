@@ -73,3 +73,18 @@ describe('feature gates', () => {
     expect(G.vmStateDatastore(kv([], 'v1.7.0', { configuration: { vmStateStorageClass: 'x' } }), scs)).toEqual({ name: 'x', how: 'set' });
   });
 });
+
+describe('VM state access mode', () => {
+  const sp = (name: string, sets: any[]) => ({ metadata: { name }, status: { claimPropertySets: sets } });
+  it('follows the storage profile like KubeVirt', () => {
+    const profiles = [
+      sp('ceph-rbd', [{ accessModes: ['ReadWriteMany'], volumeMode: 'Block' }, { accessModes: ['ReadWriteOnce'], volumeMode: 'Filesystem' }]),
+      sp('cephfs', [{ accessModes: ['ReadWriteMany'], volumeMode: 'Filesystem' }]),
+    ];
+    expect(G.vmStateAccess(null, profiles, 'ceph-rbd')).toBe('RWO');
+    expect(G.vmStateAccess(null, profiles, 'cephfs')).toBe('RWX');
+    expect(G.vmStateAccess(null, profiles, 'none')).toBe('RWO');
+    const set = { metadata: { name: 'kv' }, spec: { configuration: { vmStateStorageClass: 'none' } } } as any;
+    expect(G.vmStateAccess(set, profiles, 'none')).toBe('RWX');
+  });
+});

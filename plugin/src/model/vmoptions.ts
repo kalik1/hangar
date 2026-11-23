@@ -673,3 +673,96 @@ export function setPersistence(vm: VM, p: { efi?: boolean; tpm?: boolean }): VM 
   return out;
 }
 
+
+/* --------------------------------------------------------- machine type */
+
+/** Go's filepath.Match on a machine type (no separators in them): * any run, ? one char, [..] a class. */
+export function globMatch(pattern: string, s: string): boolean {
+  let re = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (c === '*') re += '.*';
+    else if (c === '?') re += '.';
+    else if (c === '[') {
+      const end = pattern.indexOf(']', i + 1);
+      if (end < 0) return false;
+      re += `[${pattern.slice(i + 1, end).replace(/^\^/, '^').replace(/\\/g, '\\\\')}]`;
+      i = end;
+    } else if (c === '\\' && i + 1 < pattern.length) re += `\\${pattern[++i]}`;
+    else re += c.replace(/[.+^${}()|]/g, m => `\\${m}`);
+  }
+  return new RegExp(`^${re}$`).test(s);
+}
+
+export interface ClusterMachines {
+  /** Patterns KubeVirt accepts (emulatedMachines). */
+  emulated: string[];
+  /** Machine type of VMs that set none (machineType). */
+  default: string;
+  /** Where the values come from. */
+  from: 'kubevirt' | 'architectureConfiguration' | 'configuration';
+}
+
+const MACHINE_DEFAULTS: Record<string, { emulated: string[]; machine: string }> = {
+  amd64: { emulated: ['q35*', 'pc-q35*'], machine: 'q35' },
+  arm64: { emulated: ['virt*'], machine: 'virt' },
+  s390x: { emulated: ['s390-ccw-virtio*'], machine: 's390-ccw-virtio' },
+};
+
+/**
+ * The machine types KubeVirt accepts and its default, as KubeVirt v1.7
+ * reads them (pkg/virt-config): the deprecated top-level fields first, then
+ * architectureConfiguration.<arch>, then KubeVirt's own defaults
+ * (amd64: q35*, pc-q35*; default q35).
+ */
+export function clusterMachines(kv: any, arch = 'amd64'): ClusterMachines {
+  const c = kv?.spec?.configuration ?? {};
+  const a = c.architectureConfiguration?.[arch] ?? {};
+  const def = MACHINE_DEFAULTS[arch] ?? MACHINE_DEFAULTS.amd64;
+  const emulated: string[] = c.emulatedMachines?.length ? c.emulatedMachines : a.emulatedMachines?.length ? a.emulatedMachines : def.emulated;
+  const machine: string = c.machineType || a.machineType || def.machine;
+  const from = c.emulatedMachines?.length || c.machineType ? 'configuration' : a.emulatedMachines?.length || a.machineType ? 'architectureConfiguration' : 'kubevirt';
+  return { emulated, default: machine, from };
+}
+
+export interface MachineChoice {
+  type: string;
+  /** Hosts that offer it (machine-type.node.kubevirt.io labels). */
+  hosts: string[];
+  /** KubeVirt accepts it (matches emulatedMachines). */
+  allowed: boolean;
+}
+
+/** Machine types the hosts offer, those KubeVirt accepts first; newest versions first. */
+export function machineChoices(kv: any, nodes: { metadata: { name: string; labels?: Record<string, string> } }[], arch = 'amd64'): MachineChoice[] {
+  const { emulated } = clusterMachines(kv, arch);
+  const by = new Map<string, string[]>();
+  for (const n of nodes) {
+    for (const [k, v] of Object.entries(n.metadata.labels ?? {})) {
+      const m = k.match(/^machine-type\.node\.kubevirt\.io\/(.+)$/);
+      if (m && v === 'true') by.set(m[1], [...(by.get(m[1]) ?? []), n.metadata.name]);
+    }
+  }
+  const ver = (t: string) => (t.match(/(\d+)\.(\d+)\.(\d+)$/) ?? []).slice(1).map(Number);
+  const cmp = (a: string, b: string) => {
+    const [x, y] = [ver(a), ver(b)];
+    for (let i = 0; i < 3; i++) if ((x[i] ?? -1) !== (y[i] ?? -1)) return (y[i] ?? -1) - (x[i] ?? -1);
+    return a.localeCompare(b);
+  };
+  return [...by.entries()]
+    .map(([type, hosts]) => ({ type, hosts, allowed: emulated.some(p => globMatch(p, type)) }))
+    .sort((a, b) => Number(b.allowed) - Number(a.allowed) || cmp(a.type, b.type));
+}
+
+export function machineTypeOf(vm: VM): string | undefined {
+  return domainOf(vm).machine?.type || undefined;
+}
+
+/** The VM's machine type; '' drops it (KubeVirt then uses the datacenter default at power-on). */
+export function setMachineType(vm: VM, type: string): VM {
+  const out = clone(vm);
+  const d = tpl(out).domain;
+  if (type) d.machine = { ...(d.machine ?? {}), type };
+  else delete d.machine;
+  return out;
+}

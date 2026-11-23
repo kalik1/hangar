@@ -321,3 +321,36 @@ describe('protection', () => {
     expect(P.policyState('forbidden', null)).toBe('unknown');
   });
 });
+
+describe('machine type', () => {
+  const nodes = [
+    { metadata: { name: 'a', labels: { 'machine-type.node.kubevirt.io/q35': 'true', 'machine-type.node.kubevirt.io/pc-q35-rhel9.6.0': 'true', 'machine-type.node.kubevirt.io/pc-q35-rhel9.4.0': 'true', 'machine-type.node.kubevirt.io/pc-i440fx-rhel7.6.0': 'true' } } },
+    { metadata: { name: 'b', labels: { 'machine-type.node.kubevirt.io/q35': 'true', 'machine-type.node.kubevirt.io/pc-q35-rhel9.6.0': 'true' } } },
+  ];
+  it('matches like Go filepath.Match', () => {
+    expect(O.globMatch('q35*', 'q35')).toBe(true);
+    expect(O.globMatch('pc-q35*', 'pc-q35-rhel9.6.0')).toBe(true);
+    expect(O.globMatch('pc-q35*', 'pc-i440fx-rhel7.6.0')).toBe(false);
+    expect(O.globMatch('pc-q35-rhel9.?.0', 'pc-q35-rhel9.4.0')).toBe(true);
+    expect(O.globMatch('pc-q35-rhel[89].*', 'pc-q35-rhel8.6.0')).toBe(true);
+    expect(O.globMatch('pc-q35-rhel9.6.0', 'pc-q35-rhel9x6.0')).toBe(false);
+  });
+  it('reads what KubeVirt accepts, with its defaults', () => {
+    expect(O.clusterMachines(null)).toEqual({ emulated: ['q35*', 'pc-q35*'], default: 'q35', from: 'kubevirt' });
+    expect(O.clusterMachines({ spec: { configuration: { architectureConfiguration: { amd64: { emulatedMachines: ['pc-q35-rhel9*'], machineType: 'pc-q35-rhel9.4.0' } } } } })).toEqual({
+      emulated: ['pc-q35-rhel9*'],
+      default: 'pc-q35-rhel9.4.0',
+      from: 'architectureConfiguration',
+    });
+    expect(O.clusterMachines({ spec: { configuration: { machineType: 'q35', emulatedMachines: ['q35'] } } }).from).toBe('configuration');
+  });
+  it('lists the hosts types, accepted ones first and newest first', () => {
+    const c = O.machineChoices(null, nodes);
+    expect(c.map(x => `${x.type}:${x.allowed}:${x.hosts.length}`)).toEqual(['pc-q35-rhel9.6.0:true:2', 'pc-q35-rhel9.4.0:true:1', 'q35:true:2', 'pc-i440fx-rhel7.6.0:false:1']);
+  });
+  it('sets and clears the machine type', () => {
+    const v = O.setMachineType(vm(), 'pc-q35-rhel9.4.0');
+    expect(O.machineTypeOf(v)).toBe('pc-q35-rhel9.4.0');
+    expect(O.machineTypeOf(O.setMachineType(v, ''))).toBeUndefined();
+  });
+});

@@ -422,3 +422,21 @@ export function vmStateDatastore(kv: Obj | null | undefined, storageClasses: Obj
   if (def) return { name: def.metadata.name, how: 'default' };
   return { how: 'none' };
 }
+
+/**
+ * The access mode KubeVirt gives the VM state disk (backend-storage
+ * getAccessMode, filesystem mode): from the datastore's profile, RWX first;
+ * without a profile RWX when vmStateStorageClass is set, RWO otherwise.
+ */
+export function vmStateAccess(kv: Obj | null | undefined, storageProfiles: Obj[], storageClass: string | undefined): 'RWX' | 'RWO' {
+  const fallback = clusterSettings(kv).vmStateStorageClass ? 'RWX' : 'RWO';
+  const sp = storageProfiles.find(p => p.metadata.name === storageClass);
+  const sets: any[] = sp?.status?.claimPropertySets ?? [];
+  let rwo = false;
+  for (const s of sets) {
+    if ((s.volumeMode ?? '') !== 'Filesystem' || !s.accessModes) continue;
+    if (s.accessModes.includes('ReadWriteMany')) return 'RWX';
+    if (s.accessModes.includes('ReadWriteOnce')) rwo = true;
+  }
+  return rwo ? 'RWO' : fallback;
+}

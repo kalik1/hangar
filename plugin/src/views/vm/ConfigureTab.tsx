@@ -23,12 +23,14 @@ import React from 'react';
 import * as A from '../../api/actions';
 import { HangarData, useHangar } from '../../api/data';
 import { useGate } from '../../api/gates';
+import { useNetFacts } from '../../api/podnet';
 import { datastores } from '../../model/capacity';
 import * as E from '../../model/edit';
 import { hostCpus, KIND_CLUSTER, KIND_NS, setCpuModel, setFlavor, vendors } from '../../model/flavors';
-import { clusterSettings, HOTPLUG_DECLARATIVE, vmStateDatastore } from '../../model/gates';
+import { clusterSettings, HOTPLUG_DECLARATIVE, vmStateAccess, vmStateDatastore } from '../../model/gates';
 import { hostState } from '../../model/inventory';
 import { preferredDatastore } from '../../model/placement';
+import { freeVmCidr, podNetIssues, setVmNetworkCidr, vmNetworkCidrOf } from '../../model/podnet';
 import { isProtected } from '../../model/protection';
 import { Obj } from '../../model/types';
 import { formatBytes, GiB, parseQuantity } from '../../model/units';
@@ -43,12 +45,13 @@ import { libraryImages, sizeProfiles } from '../../wizard/catalog';
 import { CpuModelSelect, FlavorSelect, useFlavorFamilies } from '../flavors/parts';
 import { GateHint } from '../settings/GateHint';
 import { datastoreItems, renderDatastore } from '../storage/DatastorePick';
+import { Note } from '../storage/parts';
 import { ClipboardPanel } from './ClipboardPanel';
 import { Help, Later, quiet, Row, saveVm } from './configParts';
 import { DevicesPanel } from './DevicesPanel';
 import { HostDevicesPanel } from './DevicesSection';
 import { DnsPanel } from './DnsPanel';
-import { CpuFlagsDialog, DiskIoDialog, DiskSettingsDialog, flagsSummary, ioSummary, ReservationDialog, reservationSummary } from './hardwareDialogs';
+import { CpuFlagsDialog, DiskIoDialog, DiskSettingsDialog, flagsSummary, ioSummary, MachineDialog, ReservationDialog, reservationSummary } from './hardwareDialogs';
 import { MoveDiskDialog } from './MoveDiskDialog';
 import { OptionsPanel } from './OptionsPanel';
 import { SharedFoldersPanel } from './SharedFoldersPanel';
@@ -111,6 +114,7 @@ function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: ()
   const [maxGuest, setMaxGuest] = React.useState(limits.maxGuest ? String(+(parseQuantity(limits.maxGuest) / GiB).toFixed(2)) : '');
   const cs = clusterSettings(d.kubevirt);
   const stateDs = vmStateDatastore(d.kubevirt, d.storageClasses);
+  const stateAccess = vmStateAccess(d.kubevirt, d.storageProfiles, stateDs.name);
   const effModel = cpuModel || vmi?.spec?.domain?.cpu?.model || d.kubevirt?.spec?.configuration?.cpuModel || 'host-model';
   const mixedMakers = vendors(hostCpus(d.nodes)).length > 1 && effModel !== 'host-model' && effModel !== 'host-passthrough';
   const memBytes = Number(mem) * GiB;
@@ -245,9 +249,17 @@ function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: ()
           </Box>
           {((fw !== 'bios' && efiKeep) || (tpm && tpmKeep)) && (
             <Help>
-              KubeVirt keeps them on a small disk {stateDs.name ? `on ${stateDs.name}` : ''}
-              {stateDs.how === 'set' ? ' (the datacenter’s VM state datastore)' : stateDs.how === 'none' ? ': no default datastore, the VM cannot start' : ' (the default datastore: VM state datastore not set in Settings)'}
-              . Without it, BitLocker and boot entries are lost at every power-off.
+              {stateDs.how === 'none' ? (
+                <>KubeVirt keeps them on a small disk, but this datacenter has no VM state datastore and no default datastore: the VM cannot start.</>
+              ) : (
+                <>
+                  KubeVirt keeps them on a small disk on <b>{stateDs.name}</b> ({stateDs.how === 'set' ? 'the VM state datastore' : 'the default datastore: no VM state datastore is set'}),{' '}
+                  {stateAccess === 'RWX'
+                    ? 'shared (RWX): hosts reach it while the VM moves.'
+                    : 'one host at a time (RWO): during a live move KubeVirt copies the state to a new disk on the target host.'}{' '}
+                  Without it, BitLocker keys and boot entries are lost at every power-off.
+                </>
+              )}
             </Help>
           )}
           {fw !== (hw.firmware === 'BIOS' ? 'bios' : hw.firmware === 'UEFI' ? 'uefi' : 'uefi-secure') && (
@@ -473,6 +485,10 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
   const size = (c?: string) => parseQuantity(pvc(c)?.status?.capacity?.storage ?? pvc(c)?.spec?.resources?.requests?.storage);
   const sc = (c?: string) => d.storageClasses.find(s => s.metadata.name === pvc(c)?.spec?.storageClassName);
   const hotGate = useGate(HOTPLUG_DECLARATIVE);
+  const netFacts = useNetFacts(d.nodes);
+  const netIssues = netFacts ? podNetIssues(vm, netFacts) : [];
+  const issueOf = (nic: string) => netIssues.find(i => i.nic === nic);
+  const freeCidr = netFacts ? freeVmCidr(netFacts) : null;
   const persist = O.persistenceOf(vm);
   const lim = O.hotAddLimitsOf(vm);
   const cs = clusterSettings(d.kubevirt);
@@ -608,6 +624,10 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
               'Custom'
             )}
           </Row>
+          <Row label="Machine type" action={<IconAction icon="mdi:pencil-outline" label="Change the machine type" onClick={() => openDialog(close => <MachineDialog vm={vm} d={d} onClose={close} />)} />}>
+            {O.machineTypeOf(vm) ?? `Datacenter default (${O.clusterMachines(d.kubevirt).default})`}
+            {vmi?.status?.machine?.type && vmi.status.machine.type !== O.machineTypeOf(vm) ? `, running as ${vmi.status.machine.type}` : ''}
+          </Row>
           <Row label="Firmware">
             {hw.firmware}
             {hw.firmware !== 'BIOS' && persist.efi ? ', UEFI variables kept' : ''}
@@ -733,7 +753,8 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
         >
           {ns.length === 0 && <Box sx={{ p: 2, color: t.muted, fontSize: 14 }}>No network adapters: the VM is isolated.</Box>}
           {ns.map(n => (
-            <Box key={n.name} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 2, py: 1, borderTop: `1px solid ${t.rule}`, flexWrap: 'wrap' }}>
+            <React.Fragment key={n.name}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 2, py: 1, borderTop: `1px solid ${t.rule}`, flexWrap: 'wrap' }}>
               <Icon icon="mdi:ethernet" width={18} style={{ color: t.muted }} />
               <Box sx={{ width: 90, fontWeight: 600, fontSize: 14 }}>{n.name}</Box>
               <TextField
@@ -776,6 +797,34 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
                 }}
               />
             </Box>
+            {issueOf(n.name) && (
+              <Box sx={{ px: 2, pb: 1 }}>
+                <Note tone="warn" icon={<Icon icon="mdi:lan-disconnect" width={16} style={{ marginTop: 2 }} />}>
+                  The NAT range of {n.name}, {issueOf(n.name)!.cidr}
+                  {issueOf(n.name)!.isDefault ? " (KubeVirt's default)" : ''}, is also {issueOf(n.name)!.conflicts.join(' and ')}: the VM cannot reach those addresses.{' '}
+                  {freeCidr ? (
+                    <>
+                      <Button
+                        size="small"
+                        sx={{ textTransform: 'none', p: 0, minWidth: 0, verticalAlign: 'baseline' }}
+                        onClick={() => quiet(saveVm(vm, `Use ${freeCidr} as NAT range`, setVmNetworkCidr(vm, freeCidr, n.name)))}
+                      >
+                        Use {freeCidr}
+                      </Button>{' '}
+                      (applies at the next power-on).
+                    </>
+                  ) : (
+                    'No free /24 found in 172.31.239.0–172.31.254.0.'
+                  )}
+                </Note>
+              </Box>
+            )}
+            {k8s && n.isPodNetwork && !issueOf(n.name) && (
+              <Box sx={{ px: 2, pb: 1, mt: -0.5 }}>
+                <K8sName>vmNetworkCIDR {vmNetworkCidrOf(vm, n.name)}</K8sName>
+              </Box>
+            )}
+            </React.Fragment>
           ))}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 0.5, borderTop: `1px solid ${t.rule}`, fontSize: 13 }}>
             <Box sx={{ color: t.muted, flex: 1 }}>Multi-queue: one queue per vCPU on VirtIO adapters (faster networking on VMs with several vCPU)</Box>

@@ -73,6 +73,14 @@ describe('buildVm', () => {
     expect(plain.spec.template.spec.startStrategy).toBeUndefined();
     expect(plain.spec.template.spec.domain.devices.inputs).toHaveLength(1);
   });
+  it('gives pod-network adapters the chosen NAT range', () => {
+    const vm = buildVm({ ...base, vmNetworkCidr: '172.31.254.0/24', nics: [{ name: 'default', network: '', model: 'virtio' }, { name: 'lan', network: 'prod/vlan', model: 'virtio' }] });
+    expect(vm.spec.template.spec.networks).toEqual([
+      { name: 'default', pod: { vmNetworkCIDR: '172.31.254.0/24' } },
+      { name: 'lan', multus: { networkName: 'prod/vlan' } },
+    ]);
+    expect(buildVm(base).spec.template.spec.networks[0]).toEqual({ name: 'default', pod: {} });
+  });
   it('writes cloud-config with keys and password', () => {
     const u = cloudInitUserData({ user: 'admin', password: 'p"w', sshKeys: ['k1', ' '] }, 'h');
     expect(u).toContain('user: admin');

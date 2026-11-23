@@ -195,6 +195,8 @@ export interface WizardInput {
   headless?: boolean;
   /** Sound card model. */
   sound?: 'ich9' | 'ac97';
+  /** NAT network inside the pod for pod-network adapters (vmNetworkCIDR); undefined: KubeVirt's 10.0.2.0/24. */
+  vmNetworkCidr?: string;
 }
 
 export function cloudInitUserData(c: NonNullable<WizardInput['cloudInit']>, hostname: string): string {
@@ -270,7 +272,7 @@ export function buildVm(w: WizardInput): VM {
     const name = n.name || (i === 0 ? 'default' : `nic${i}`);
     if (!n.network) {
       interfaces.push({ name, masquerade: {}, model: n.model });
-      networks.push({ name, pod: {} });
+      networks.push({ name, pod: w.vmNetworkCidr ? { vmNetworkCIDR: w.vmNetworkCidr } : {} });
     } else {
       interfaces.push({ name, bridge: {}, model: n.model });
       networks.push({ name, multus: { networkName: n.network } });

@@ -37,6 +37,7 @@ import {
   kubevirtVersion,
   listedGates,
   nextGates,
+  vmStateAccess,
   vmStateDatastore,
   vmsUsingGate,
 } from '../../model/gates';
@@ -278,8 +279,6 @@ function ClusterSettingsPanel({ d }: { d: HangarData }) {
   const kv = d.kubevirt;
   const c = clusterSettings(kv);
   const state = vmStateDatastore(kv, d.storageClasses);
-  const sp = d.storageProfiles.find(p => p.metadata.name === state.name);
-  const rwx = (sp?.status?.claimPropertySets ?? []).some((x: any) => (x.accessModes ?? []).includes('ReadWriteMany') && (x.volumeMode ?? 'Filesystem') === 'Filesystem');
   const evict = c.evictionStrategy ?? 'None';
   return (
     <Panel title="Settings these features need" icon="mdi:tune-vertical">
@@ -306,7 +305,7 @@ function ClusterSettingsPanel({ d }: { d: HangarData }) {
         {state.how === 'virt-default' && <>Not chosen: KubeVirt uses the default VM datastore, {state.name}.</>}
         {state.how === 'default' && <>Not chosen: KubeVirt uses the cluster&apos;s default datastore, {state.name}.</>}
         {state.how === 'none' && <>Not chosen and there is no default datastore: VMs with a persistent TPM or UEFI variables cannot start.</>}
-        {state.how !== 'set' && state.how !== 'none' && !rwx && ' On it the state disk belongs to one host, so such VMs cannot move live.'}
+        {state.how !== 'none' && ` Access: ${vmStateAccess(kv, d.storageProfiles, state.name) === 'RWX' ? 'shared (RWX).' : 'one host at a time (RWO): KubeVirt copies the state to a new disk when the VM moves live.'}`}
         {state.how !== 'set' && ' Set spec.configuration.vmStateStorageClass of the KubeVirt resource to a shared (RWX file) datastore to choose.'}
       </SettingRow>
       <SettingRow label="On host maintenance (default)" k8sName={`evictionStrategy: ${c.evictionStrategy ?? '(not set)'}`}>
