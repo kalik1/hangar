@@ -4,6 +4,7 @@
  * the cluster is missing when snapshots cannot work.
  */
 
+import { gateState as gateStateOf } from './gates';
 import { slugName } from './library';
 import { Obj } from './types';
 import { parseQuantity } from './units';
@@ -127,12 +128,10 @@ export function diskCoverage(vm: Obj): DiskCoverage[] {
 
 export type GateState = 'on' | 'off' | 'unknown';
 
-/** The KubeVirt feature gate as written in the KubeVirt resource (absent may still mean GA). */
+/** The KubeVirt feature gate as KubeVirt sees it (model/gates.ts): on, off, or unknown (a KubeVirt version Hangar has no table for). */
 export function featureGate(kubevirt: Obj | null | undefined, gate: string): GateState {
-  const dc = kubevirt?.spec?.configuration?.developerConfiguration ?? {};
-  if ((dc.featureGates ?? []).includes(gate)) return 'on';
-  if ((dc.disabledFeatureGates ?? []).includes(gate)) return 'off';
-  return 'unknown';
+  const s = gateStateOf(kubevirt, gate);
+  return s.on === true ? 'on' : s.on === false ? 'off' : 'unknown';
 }
 
 export interface Support {

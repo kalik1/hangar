@@ -26,6 +26,7 @@ import { NOT_ALLOWED } from '../../api/permissions';
 import { useProtectionPolicy } from '../../api/protection';
 import {
   clusterSettings,
+  disabledGates,
   GateArea,
   gateProblems,
   GateRow,
@@ -133,7 +134,7 @@ export function SettingsView({ section: raw, focus }: { section?: string; focus?
 function stateOf(r: GateState): { tone: LedTone; text: string } {
   if (r.maturity === 'GA') return { tone: 'on', text: 'Always on' };
   if (r.maturity === 'Discontinued') return { tone: 'off', text: 'Removed' };
-  if (r.on === true) return { tone: 'on', text: 'On' };
+  if (r.on === true) return { tone: 'on', text: r.byDefault && !r.listed ? 'On (default)' : 'On' };
   if (r.on === false) return { tone: r.listed ? 'standby' : 'off', text: 'Off' };
   return { tone: 'off', text: 'Unknown' };
 }
@@ -145,7 +146,15 @@ function MaturityTag({ m }: { m: GateState['maturity'] }) {
 }
 
 async function toggleGate(d: HangarData, kv: Obj, r: GateRow, on: boolean, k4all: boolean) {
-  const { removed } = nextGates(listedGates(kv), r.name, on);
+  const next = nextGates(kv, r.name, on);
+  const { removed } = next;
+  const before = { f: listedGates(kv), dis: disabledGates(kv) };
+  const changes = [
+    ...next.featureGates.filter(g => !before.f.includes(g)).map(g => `adds ${g} to featureGates`),
+    ...before.f.filter(g => !next.featureGates.includes(g)).map(g => `removes ${g} from featureGates`),
+    ...next.disabledFeatureGates.filter(g => !before.dis.includes(g)).map(g => `adds ${g} to disabledFeatureGates`),
+    ...before.dis.filter(g => !next.disabledFeatureGates.includes(g)).map(g => `removes ${g} from disabledFeatureGates`),
+  ];
   // VMs that lose a feature: this gate's when turning it off, the rival's when turning this one on.
   const losing = on ? removed : [r.name];
   const users = losing.flatMap(g => vmsUsingGate(d.vms, g));
@@ -158,7 +167,7 @@ async function toggleGate(d: HangarData, kv: Obj, r: GateRow, on: boolean, k4all
           <b>{what}</b>: {on ? 'on' : 'off'} for the whole datacenter.
         </p>
         <p>
-          Hangar {on ? 'adds' : 'removes'} <code>{r.name}</code> {on ? 'to' : 'from'} the feature gates of the KubeVirt resource; the other gates stay as they are.
+          In the KubeVirt resource Hangar {changes.length ? changes.join(', ') : 'changes nothing'}; the other gates stay as they are.
         </p>
         {on && r.maturity === 'Alpha' && (
           <p>
@@ -241,7 +250,7 @@ function GateLine({ r, d, kv, canPatch, k4all, focus }: { r: GateRow; d: HangarD
           <Tooltip title={why ?? (r.on ? `Turn off ${r.name}` : `Turn on ${r.name}`)}>
             <span>
               <Switch
-                checked={r.listed}
+                checked={!!r.on}
                 disabled={!!why}
                 onChange={e => kv && toggleGate(d, kv, r, e.target.checked, k4all)}
                 inputProps={{ 'aria-label': `${r.name}: ${r.feature?.unlocks ?? ''}` }}

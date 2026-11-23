@@ -151,9 +151,10 @@ export function DevicesPanel({ vm }: { vm: Obj }) {
       <Row label="VSOCK" align="flex-start" action={flagSwitch('VSOCK', o.vsock, vsock, v => set(v ? 'Add VSOCK' : 'Remove VSOCK', { vsock: v }))}>
         {o.vsock ? 'On: host–guest sockets without a network' : 'Off'}
         {vsock.on === false && !o.vsock ? <GateHint gate="VSOCK" sx={{ mt: 0.5 }} /> : <Help>For agents that talk to the host over AF_VSOCK; KubeVirt gives the VM a context ID (CID).</Help>}
-        {o.vsock && /^v1\.7\./.test(kubevirtVersion(d.kubevirt) ?? '') && (
+        {o.vsock && /^v1\.(7\.|8\.[0-3]$)/.test(kubevirtVersion(d.kubevirt) ?? '') && (
           <Help tone="warn">
-            KubeVirt v1.7 draws the CID from the whole 32-bit range but its API accepts only half of it: about one power-on in two then stays in Starting. Power the VM off and on again.
+            KubeVirt before v1.8.4 draws the CID from the whole 32-bit range but its VMI schema accepts only half of it (kubevirt#17688): about one power-on in two
+            then stays in Starting. Power the VM off and on again, or upgrade KubeVirt.
           </Help>
         )}
       </Row>

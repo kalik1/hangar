@@ -1,8 +1,8 @@
 import * as G from './gates';
 
-const kv = (gates: string[], version = 'v1.7.0', extra: any = {}) => ({
+const kv = (gates: string[], version = 'v1.7.0', extra: any = {}, disabled?: string[]): any => ({
   metadata: { name: 'kubevirt', namespace: 'kubevirt', resourceVersion: '5' },
-  spec: { configuration: { developerConfiguration: { featureGates: gates }, ...extra.configuration }, ...extra.spec },
+  spec: { configuration: { developerConfiguration: { featureGates: gates, ...(disabled ? { disabledFeatureGates: disabled } : {}) }, ...extra.configuration }, ...extra.spec },
   status: { observedKubeVirtVersion: version },
 });
 
@@ -10,7 +10,10 @@ describe('feature gates', () => {
   it('finds the table by minor version and says unknown otherwise', () => {
     expect(G.gateTable(kv([], 'v1.7.0'))?.version).toBe('v1.7');
     expect(G.gateTable(kv([], 'v1.7.3'))?.version).toBe('v1.7');
-    expect(G.gateTable(kv([], 'v1.8.0'))).toBeNull();
+    expect(G.gateTable(kv([], 'v1.8.4'))?.version).toBe('v1.8');
+    expect(G.gateTable(kv([], 'v1.9.1'))?.version).toBe('v1.9');
+    expect(G.gateTable(kv([], 'v1.10.0'))?.version).toBe('v1.10');
+    expect(G.gateTable(kv([], 'v1.11.0'))).toBeNull();
     expect(G.gateTable(null)).toBeNull();
   });
   it('knows GA gates are always on and Alpha/Beta only when listed', () => {
@@ -23,7 +26,7 @@ describe('feature gates', () => {
     expect(G.gateState(k, 'Passt')).toMatchObject({ maturity: 'Discontinued', on: false });
   });
   it('does not guess on an unknown version', () => {
-    const k = kv(['VSOCK'], 'v1.9.0');
+    const k = kv(['VSOCK'], 'v1.11.0');
     expect(G.gateState(k, 'VSOCK')).toMatchObject({ maturity: null, on: true });
     expect(G.gateState(k, 'VMLiveUpdateFeatures')).toMatchObject({ maturity: null, on: null });
   });
@@ -32,20 +35,22 @@ describe('feature gates', () => {
     expect(G.gateState(k, 'DeclarativeHotplugVolumes').on).toBe(false);
     expect(G.gateProblems(k)[0]).toMatch(/both on/);
   });
-  it('never writes both hot-plug gates and keeps the others', () => {
-    expect(G.nextGates(['Snapshot', 'HotplugVolumes'], 'DeclarativeHotplugVolumes', true)).toEqual({
-      gates: ['Snapshot', 'DeclarativeHotplugVolumes'],
+  it('never writes both hot-plug gates and keeps the others (v1.7: featureGates only)', () => {
+    expect(G.nextGates(kv(['Snapshot', 'HotplugVolumes']), 'DeclarativeHotplugVolumes', true)).toEqual({
+      featureGates: ['Snapshot', 'DeclarativeHotplugVolumes'],
+      disabledFeatureGates: [],
       removed: ['HotplugVolumes'],
     });
-    expect(G.nextGates(['DeclarativeHotplugVolumes', 'Snapshot'], 'HotplugVolumes', true).gates).toEqual(['Snapshot', 'HotplugVolumes']);
-    expect(G.nextGates(['Snapshot', 'VSOCK'], 'VSOCK', true).gates).toEqual(['Snapshot', 'VSOCK']);
-    expect(G.nextGates(['Snapshot', 'VSOCK', 'Sidecar'], 'VSOCK', false).gates).toEqual(['Snapshot', 'Sidecar']);
+    expect(G.nextGates(kv(['DeclarativeHotplugVolumes', 'Snapshot']), 'HotplugVolumes', true).featureGates).toEqual(['Snapshot', 'HotplugVolumes']);
+    expect(G.nextGates(kv(['Snapshot', 'VSOCK']), 'VSOCK', true).featureGates).toEqual(['Snapshot', 'VSOCK']);
+    expect(G.nextGates(kv(['Snapshot', 'VSOCK', 'Sidecar']), 'VSOCK', false).featureGates).toEqual(['Snapshot', 'Sidecar']);
   });
   it('lists Hangar gates, then unknown listed ones, then the rest', () => {
     const r = G.gateRows(kv(['Snapshot', 'MyOwnGate']));
     expect(r.hangar[0].name).toBe('DeclarativeHotplugVolumes');
     expect(r.listedOther.map(x => x.name)).toEqual(['MyOwnGate']);
-    expect(r.listedOther[0]).toMatchObject({ maturity: null, on: true });
+    expect(r.listedOther[0]).toMatchObject({ maturity: null, on: false });
+    expect(r.listedOther[0].note).toMatch(/does not know/);
     expect(r.other.some(x => x.name === 'ImageVolume')).toBe(true);
     expect(r.other.some(x => x.name === 'Snapshot')).toBe(false);
   });
@@ -86,5 +91,48 @@ describe('VM state access mode', () => {
     expect(G.vmStateAccess(null, profiles, 'none')).toBe('RWO');
     const set = { metadata: { name: 'kv' }, spec: { configuration: { vmStateStorageClass: 'none' } } } as any;
     expect(G.vmStateAccess(set, profiles, 'none')).toBe('RWX');
+  });
+});
+
+describe('feature gates by KubeVirt minor', () => {
+  it('takes the maturity from the running minor', () => {
+    const m = (v: string, g: string) => G.gateState(kv([], v), g).maturity;
+    expect([m('v1.7.0', 'ExpandDisks'), m('v1.8.4', 'ExpandDisks'), m('v1.9.1', 'ExpandDisks')]).toEqual(['Alpha', 'Alpha', 'GA']);
+    expect([m('v1.7.0', 'EnableVirtioFsConfigVolumes'), m('v1.8.4', 'EnableVirtioFsConfigVolumes')]).toEqual(['Alpha', 'GA']);
+    expect([m('v1.8.4', 'DeclarativeHotplugVolumes'), m('v1.9.1', 'DeclarativeHotplugVolumes')]).toEqual(['Alpha', 'Beta']);
+    expect([m('v1.8.4', 'HotplugVolumes'), m('v1.9.1', 'HotplugVolumes')]).toEqual(['Alpha', 'Deprecated']);
+    expect([m('v1.9.1', 'VSOCK'), m('v1.10.0', 'VSOCK')]).toEqual(['Alpha', 'Beta']);
+    expect(m('v1.7.0', 'IOMMUFD')).toBeNull();
+    expect(m('v1.9.1', 'IOMMUFD')).toBe('Alpha');
+  });
+  it('turns Beta on by default from v1.9, off through disabledFeatureGates', () => {
+    // v1.8: Beta off unless listed.
+    expect(G.gateState(kv([], 'v1.8.4'), 'Snapshot')).toMatchObject({ maturity: 'Beta', on: false, byDefault: false });
+    // v1.9: Beta on unless disabled.
+    expect(G.gateState(kv([], 'v1.9.1'), 'Snapshot')).toMatchObject({ maturity: 'Beta', on: true, byDefault: true });
+    expect(G.gateState(kv([], 'v1.9.1', {}, ['Snapshot']), 'Snapshot')).toMatchObject({ on: false, disabled: true });
+    // Listed wins over disabled, as in KubeVirt's IsEnabled (and is flagged).
+    expect(G.gateState(kv(['Snapshot'], 'v1.9.1', {}, ['Snapshot']), 'Snapshot').on).toBe(true);
+    expect(G.gateProblems(kv(['Snapshot'], 'v1.9.1', {}, ['Snapshot']))[0]).toMatch(/both featureGates and disabledFeatureGates/);
+    // A gate a known version does not know does nothing.
+    expect(G.gateState(kv(['MyGate'], 'v1.9.1'), 'MyGate')).toMatchObject({ maturity: null, on: false });
+  });
+  it('writes the right list per version', () => {
+    // v1.9: turning a default-on Beta gate off goes to disabledFeatureGates, on again removes it.
+    expect(G.nextGates(kv(['Sidecar'], 'v1.9.1'), 'Snapshot', false)).toEqual({ featureGates: ['Sidecar'], disabledFeatureGates: ['Snapshot'], removed: [] });
+    expect(G.nextGates(kv(['Sidecar', 'Snapshot'], 'v1.9.1'), 'Snapshot', false)).toEqual({ featureGates: ['Sidecar'], disabledFeatureGates: ['Snapshot'], removed: [] });
+    expect(G.nextGates(kv(['Sidecar'], 'v1.9.1', {}, ['Snapshot']), 'Snapshot', true)).toEqual({ featureGates: ['Sidecar'], disabledFeatureGates: [], removed: [] });
+    // v1.8: Beta is off by default, so it goes in featureGates.
+    expect(G.nextGates(kv([], 'v1.8.4'), 'Snapshot', true).featureGates).toEqual(['Snapshot']);
+    // Alpha everywhere: featureGates.
+    expect(G.nextGates(kv([], 'v1.10.0', {}, ['Sidecar']), 'Sidecar', true)).toEqual({ featureGates: ['Sidecar'], disabledFeatureGates: [], removed: [] });
+    // v1.9: DeclarativeHotplugVolumes is on by default; turning the deprecated HotplugVolumes on disables it.
+    expect(G.nextGates(kv([], 'v1.9.1'), 'HotplugVolumes', true)).toEqual({ featureGates: ['HotplugVolumes'], disabledFeatureGates: ['DeclarativeHotplugVolumes'], removed: ['DeclarativeHotplugVolumes'] });
+    expect(G.nextGates(kv(['HotplugVolumes'], 'v1.9.1', {}, ['DeclarativeHotplugVolumes']), 'DeclarativeHotplugVolumes', true)).toEqual({
+      featureGates: [],
+      disabledFeatureGates: [],
+      removed: ['HotplugVolumes'],
+    });
+    expect(G.gateState(kv(['HotplugVolumes'], 'v1.9.1'), 'DeclarativeHotplugVolumes').on).toBe(false);
   });
 });

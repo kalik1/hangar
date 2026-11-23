@@ -259,7 +259,9 @@ history keeps growing, the tasks keep being followed.
     Discontinued, or unknown), where it shows in Hangar and the VMs that
     use it; other gates listed in the KubeVirt resource, and the rest of
     the version's table on request. The maturity table is keyed by KubeVirt
-    minor version (`src/model/gates.ts`, v1.7 from the v1.7.0 source); for
+    minor version (`src/model/gateTables.ts`: v1.7.0, v1.8.4, v1.9.1 and
+    v1.10.0 sources; from v1.9 Beta gates are on by default and turned off
+    through disabledFeatureGates); for
     another version maturity is "unknown" and an unlisted gate's state is
     unknown too. Next to it, the cluster settings those features need:
     LiveMigrate workload updates, vmRolloutStrategy, the hot-add ratio and
@@ -510,19 +512,23 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
   next restart. Only sockets can be added; memory needs at least 1 GiB,
   goes in 2 MiB blocks, and cannot go below the size at power-on while
   running.
-- Feature gate maturity is known per KubeVirt minor version (v1.7 today);
-  a newer KubeVirt shows "maturity unknown" until the table gains it.
+- Feature gate maturity is known per KubeVirt minor version (v1.7 to v1.10,
+  `src/model/gateTables.ts`); a newer KubeVirt shows "maturity unknown"
+  until the table gains it.
 - vGPU display options apply to mediated devices only and were not tried on
   a real vGPU.
-- KubeVirt v1.7 draws a VM's VSOCK CID from the whole 32-bit range while its
-  VMI schema accepts int32 only: on recent Kubernetes about one power-on in
-  two of a VSOCK VM stays in Starting (virt-controller cannot write the
-  status). Configure → Devices says so; powering the VM off and on again
-  draws a new CID.
+- KubeVirt before v1.8.4 draws a VM's VSOCK CID from the whole 32-bit range
+  while its VMI schema accepts int32 only: on recent Kubernetes about one
+  power-on in two of a VSOCK VM stays in Starting (kubevirt#17688, fixed in
+  v1.8.4 and v1.9). Configure → Devices says so on those versions; powering
+  the VM off and on again draws a new CID.
 - A VM with shared folders that is stuck before running cannot be powered
   off with a grace period (KubeVirt's VMI update webhook refuses the patch:
-  "volume … doesn't have a matching disk"); setting its power policy to Off
-  stops it.
+  "volume … doesn't have a matching disk", kubevirt#19522, fix pending);
+  setting its power policy to Off stops it.
+- Feature gates: from KubeVirt v1.9 Beta gates are on unless listed in
+  disabledFeatureGates; Hangar turns a Beta gate off there (and writes
+  disabledFeatureGates only on v1.8 and later). Tables for v1.7 to v1.10.
 
 ## 8. Later
 

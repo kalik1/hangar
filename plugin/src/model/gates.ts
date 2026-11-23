@@ -10,86 +10,24 @@
  * has no table for, the maturity is "unknown" rather than a guess.
  */
 
+import { GATE_TABLES } from './gateTables';
 import { Obj } from './types';
 
 export type Maturity = 'GA' | 'Beta' | 'Alpha' | 'Deprecated' | 'Discontinued';
 
 export interface GateTable {
-  /** KubeVirt minor version the table describes ("v1.7" covers v1.7.x). */
+  /** KubeVirt minor version the table describes ("v1.9" covers v1.9.x). */
   version: string;
   /** Where the table comes from. */
   source: string;
+  /** Beta gates are on unless listed in disabledFeatureGates (v1.9 on); before, off unless listed. */
+  betaOnByDefault: boolean;
+  /** The KubeVirt resource has developerConfiguration.disabledFeatureGates (v1.8 on). */
+  disabledList: boolean;
   gates: Record<string, Maturity>;
 }
 
-export const GATE_TABLES: GateTable[] = [
-  {
-    version: 'v1.7',
-    source: 'KubeVirt v1.7.0 source, pkg/virt-config/featuregate/active.go and inactive.go',
-    gates: {
-      // active.go
-      ImageVolume: 'Beta',
-      ExpandDisks: 'Alpha',
-      CPUManager: 'Alpha',
-      ExperimentalIgnitionSupport: 'Alpha',
-      HypervStrictCheck: 'Alpha',
-      Sidecar: 'Alpha',
-      HostDevices: 'Alpha',
-      Snapshot: 'Beta',
-      VMExport: 'Beta',
-      HotplugVolumes: 'Alpha',
-      HostDisk: 'Alpha',
-      DownwardMetrics: 'Alpha',
-      Root: 'Alpha',
-      WorkloadEncryptionSEV: 'Alpha',
-      WorkloadEncryptionTDX: 'Alpha',
-      VSOCK: 'Alpha',
-      KubevirtSeccompProfile: 'Beta',
-      DisableMDEVConfiguration: 'Alpha',
-      PersistentReservation: 'Alpha',
-      MultiArchitecture: 'Alpha',
-      AlignCPUs: 'Alpha',
-      NodeRestriction: 'Beta',
-      EnableVirtioFsConfigVolumes: 'Alpha',
-      EnableVirtioFsStorageVolumes: 'Alpha',
-      GPUsWithDRA: 'Alpha',
-      HostDevicesWithDRA: 'Alpha',
-      DecentralizedLiveMigration: 'Alpha',
-      DeclarativeHotplugVolumes: 'Alpha',
-      SecureExecution: 'Beta',
-      VideoConfig: 'Beta',
-      PanicDevices: 'Beta',
-      PasstIPStackMigration: 'Alpha',
-      IncrementalBackup: 'Alpha',
-      MigrationPriorityQueue: 'Alpha',
-      // inactive.go
-      LiveMigration: 'GA',
-      SRIOVLiveMigration: 'GA',
-      NonRoot: 'GA',
-      PSA: 'GA',
-      CPUNodeDiscovery: 'GA',
-      NUMA: 'GA',
-      CommonInstancetypesDeploymentGate: 'GA',
-      GPU: 'GA',
-      HotplugNICs: 'GA',
-      BochsDisplayForEFIGuests: 'GA',
-      VMLiveUpdateFeatures: 'GA',
-      NetworkBindingPlugins: 'GA',
-      DynamicPodInterfaceNaming: 'GA',
-      VolumesUpdateStrategy: 'GA',
-      VolumeMigration: 'GA',
-      DisableCustomSELinuxPolicy: 'GA',
-      AutoResourceLimitsGate: 'GA',
-      ClusterProfiler: 'GA',
-      VMPersistentState: 'GA',
-      InstancetypeReferencePolicy: 'GA',
-      DockerSELinuxMCSWorkaround: 'Deprecated',
-      ExperimentalVirtiofsSupport: 'Deprecated',
-      Passt: 'Discontinued',
-      Macvtap: 'Discontinued',
-    },
-  },
-];
+export { GATE_TABLES };
 
 /** KubeVirt's running version (v1.7.0), from the KubeVirt resource. */
 export function kubevirtVersion(kv: Obj | null | undefined): string | undefined {
@@ -108,14 +46,23 @@ export function listedGates(kv: Obj | null | undefined): string[] {
   return (kv?.spec?.configuration?.developerConfiguration?.featureGates ?? []) as string[];
 }
 
+/** Gates listed in developerConfiguration.disabledFeatureGates (KubeVirt v1.8 on). */
+export function disabledGates(kv: Obj | null | undefined): string[] {
+  return (kv?.spec?.configuration?.developerConfiguration?.disabledFeatureGates ?? []) as string[];
+}
+
 export interface GateState {
   name: string;
   /** null: no table for this KubeVirt version, or a gate the table does not know. */
   maturity: Maturity | null;
-  /** Listed in the KubeVirt resource. */
+  /** Listed in featureGates of the KubeVirt resource. */
   listed: boolean;
+  /** Listed in disabledFeatureGates. */
+  disabled: boolean;
   /** On for KubeVirt; null when Hangar cannot tell (unknown version, not listed). */
   on: boolean | null;
+  /** On without being listed (GA, or Beta from v1.9). */
+  byDefault: boolean;
   /** Something to know (redundant entry, overridden, discontinued). */
   note?: string;
 }
@@ -123,46 +70,87 @@ export interface GateState {
 export const HOTPLUG_OLD = 'HotplugVolumes';
 export const HOTPLUG_DECLARATIVE = 'DeclarativeHotplugVolumes';
 
-export function gateState(kv: Obj | null | undefined, name: string): GateState {
+/** The gate's state as KubeVirt computes it (featuregate.IsEnabled), without the hot-plug precedence. */
+function rawState(kv: Obj | null | undefined, name: string): GateState {
   const listed = listedGates(kv).includes(name);
+  const disabled = disabledGates(kv).includes(name);
   const table = gateTable(kv);
   const maturity = table?.gates[name] ?? null;
   let on: boolean | null;
+  let byDefault = false;
   let note: string | undefined;
-  switch (maturity) {
-    case 'GA':
-      on = true;
-      if (listed) note = 'Listed in the KubeVirt resource, but always on: the entry can go.';
-      break;
-    case 'Discontinued':
-      on = false;
-      if (listed) note = 'Removed from KubeVirt: the entry does nothing.';
-      break;
-    case null:
-      on = listed ? true : null;
-      break;
-    default:
-      on = listed;
+  if (!table) on = listed ? true : disabled ? false : null;
+  else
+    switch (maturity) {
+      case 'GA':
+        on = true;
+        byDefault = true;
+        if (listed || disabled) note = `${disabled ? 'Listed in disabledFeatureGates, but' : 'Listed in the KubeVirt resource, but'} always on: the entry can go.`;
+        break;
+      case 'Discontinued':
+        on = false;
+        if (listed) note = 'Removed from KubeVirt: the entry does nothing.';
+        break;
+      case 'Beta':
+        byDefault = table.betaOnByDefault;
+        on = listed || (table.betaOnByDefault && !disabled);
+        break;
+      case null:
+        on = false;
+        if (listed || disabled) note = `KubeVirt ${table.version} does not know this gate: the entry does nothing.`;
+        break;
+      default:
+        on = listed;
+    }
+  return { name, maturity, listed, disabled, on, byDefault, note };
+}
+
+export function gateState(kv: Obj | null | undefined, name: string): GateState {
+  const s = rawState(kv, name);
+  // KubeVirt's VM controller skips declarative hot-plug while the old gate is on.
+  if (name === HOTPLUG_DECLARATIVE && s.on && rawState(kv, HOTPLUG_OLD).on) {
+    return { ...s, on: false, note: `${HOTPLUG_OLD} is also on and takes precedence: turn it off.` };
   }
-  // KubeVirt's VM controller skips declarative hot-plug while the old gate is listed.
-  if (name === HOTPLUG_DECLARATIVE && on && listedGates(kv).includes(HOTPLUG_OLD)) {
-    on = false;
-    note = `${HOTPLUG_OLD} is also on and takes precedence: turn it off.`;
-  }
-  return { name, maturity, listed, on, note };
+  return s;
+}
+
+export interface GateLists {
+  featureGates: string[];
+  disabledFeatureGates: string[];
 }
 
 /**
- * The feature gate list after turning `name` on or off. Others are kept in
- * their order; the two hot-plug gates are never written together (the old
- * one would win). `removed` names what else went.
+ * The gate lists after turning `name` on or off, as KubeVirt reads them
+ * (`kv` gives the version): an Alpha gate goes in or out of featureGates; a
+ * Beta gate that is on by default (v1.9 on) is turned off through
+ * disabledFeatureGates; a gate is never in both lists. The two hot-plug
+ * gates are never on together (the old one would win): turning one on turns
+ * the other off. `removed` names what else went off.
  */
-export function nextGates(current: string[], name: string, on: boolean): { gates: string[]; removed: string[] } {
-  if (!on) return { gates: current.filter(g => g !== name), removed: [] };
-  const rival = name === HOTPLUG_DECLARATIVE ? HOTPLUG_OLD : name === HOTPLUG_OLD ? HOTPLUG_DECLARATIVE : null;
-  const removed = rival && current.includes(rival) ? [rival] : [];
-  const gates = current.filter(g => !removed.includes(g));
-  return { gates: gates.includes(name) ? gates : [...gates, name], removed };
+export function nextGates(kv: Obj | null | undefined, name: string, on: boolean): GateLists & { removed: string[] } {
+  const table = gateTable(kv);
+  let featureGates = [...listedGates(kv)];
+  let disabledFeatureGates = [...disabledGates(kv)];
+  const removed: string[] = [];
+  const set = (gate: string, want: boolean) => {
+    const defaultOn = rawState(kv, gate).maturity === 'Beta' && !!table?.betaOnByDefault;
+    disabledFeatureGates = disabledFeatureGates.filter(g => g !== gate);
+    if (want) {
+      if (!defaultOn && !featureGates.includes(gate)) featureGates.push(gate);
+    } else {
+      featureGates = featureGates.filter(g => g !== gate);
+      if (defaultOn) disabledFeatureGates.push(gate);
+    }
+  };
+  if (on) {
+    const rival = name === HOTPLUG_DECLARATIVE ? HOTPLUG_OLD : name === HOTPLUG_OLD ? HOTPLUG_DECLARATIVE : null;
+    if (rival && rawState(kv, rival).on) {
+      set(rival, false);
+      removed.push(rival);
+    }
+  }
+  set(name, on);
+  return { featureGates, disabledFeatureGates: table?.disabledList || disabledGates(kv).length ? disabledFeatureGates : [], removed };
 }
 
 /* ------------------------------------------------ what Hangar does with them */
@@ -361,11 +349,12 @@ export function gateRows(kv: Obj | null | undefined): { hangar: GateRow[]; liste
 export function gateProblems(kv: Obj | null | undefined): string[] {
   const listed = listedGates(kv);
   const out: string[] = [];
-  if (listed.includes(HOTPLUG_OLD) && listed.includes(HOTPLUG_DECLARATIVE))
+  if (rawState(kv, HOTPLUG_OLD).on && rawState(kv, HOTPLUG_DECLARATIVE).on)
     out.push(`${HOTPLUG_OLD} and ${HOTPLUG_DECLARATIVE} are both on: KubeVirt uses the old one, so disks cannot be hot-plugged from Hangar. Turn ${HOTPLUG_OLD} off.`);
   for (const g of listed) {
     const s = gateState(kv, g);
     if (s.maturity === 'Discontinued') out.push(`${g} was removed from KubeVirt: the entry does nothing.`);
+    if (s.disabled) out.push(`${g} is in both featureGates and disabledFeatureGates of the KubeVirt resource: KubeVirt turns it on; remove one entry.`);
   }
   return out;
 }

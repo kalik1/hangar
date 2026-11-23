@@ -180,15 +180,17 @@ a key press or click in the console.
 ### KubeVirt features
 
 Settings → Features lists KubeVirt's feature gates in plain words: on or
-off, how mature each one is (GA features are always on; Alpha and Beta ones
-only when listed in the KubeVirt resource), what it unlocks in Hangar and
+off, how mature each one is (GA features are always on; Alpha ones only when
+listed in the KubeVirt resource; Beta ones only when listed up to KubeVirt
+v1.8, and unless disabled from v1.9), what it unlocks in Hangar and
 which VMs use it, next to the cluster settings some of them need
 (LiveMigrate updates, live updates, hot-add ceilings, where UEFI and TPM
 state is kept, the default behaviour on host maintenance). The maturity
-table is per KubeVirt version (v1.7, taken from its source); for another
-version Hangar says the maturity is unknown. A user who may patch the
+table is per KubeVirt minor version (v1.7 to v1.10, taken from their
+sources); for another version Hangar says the maturity is unknown. A user who may patch the
 KubeVirt resource turns a feature on or off there: Hangar changes only the
-feature gate list, read fresh before writing, and never writes
+feature gate lists (featureGates, disabledFeatureGates), read fresh before
+writing, and never writes
 `HotplugVolumes` together with `DeclarativeHotplugVolumes`. Controls
 elsewhere that need a feature that is off are disabled with the reason and
 a link to it.

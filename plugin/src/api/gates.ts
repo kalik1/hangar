@@ -1,12 +1,12 @@
 /*
- * KubeVirt feature gates: turning one on or off (only the featureGates list
- * of the KubeVirt resource, read fresh and written with its
- * resourceVersion), whether the user may, and whether k4all runs the
+ * KubeVirt feature gates: turning one on or off (only the featureGates and
+ * disabledFeatureGates lists of the KubeVirt resource, read fresh and
+ * written with its resourceVersion), whether the user may, and whether k4all runs the
  * cluster (it will manage KubeVirt's features from its own addon).
  */
 
 import React from 'react';
-import { gateState, listedGates, nextGates } from '../model/gates';
+import { disabledGates, gateState, gateTable, nextGates } from '../model/gates';
 import { Obj } from '../model/types';
 import { runTask } from './actions';
 import { currentCluster, kmerge, kreq } from './client';
@@ -20,12 +20,18 @@ export function setFeatureGate(kv: Obj, name: string, on: boolean) {
   return runTask({ title: `${on ? 'Turn on' : 'Turn off'} ${name}`, target: { kind: 'datacenter', name: 'Features' } }, async () => {
     for (let attempt = 0; ; attempt++) {
       const fresh = await kreq<Obj>(kvPath(kv));
-      const { gates } = nextGates(listedGates(fresh), name, on);
+      const next = nextGates(fresh, name, on);
+      // disabledFeatureGates exists from KubeVirt v1.8: written only where KubeVirt has it.
+      const writeDisabled = !!gateTable(fresh)?.disabledList || disabledGates(fresh).length > 0;
       try {
-        // A merge patch replaces just this list; the resourceVersion makes it fail if the resource changed since the read.
+        // A merge patch replaces just these lists; the resourceVersion makes it fail if the resource changed since the read.
         await kmerge(kvPath(fresh), {
           metadata: { resourceVersion: fresh.metadata.resourceVersion },
-          spec: { configuration: { developerConfiguration: { featureGates: gates } } },
+          spec: {
+            configuration: {
+              developerConfiguration: { featureGates: next.featureGates, ...(writeDisabled ? { disabledFeatureGates: next.disabledFeatureGates } : {}) },
+            },
+          },
         });
         return;
       } catch (e: any) {
