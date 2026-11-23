@@ -17,13 +17,36 @@ import { useTokens } from '../../ui/useTokens';
 
 export const quiet = (p: Promise<unknown>) => p.catch(() => undefined);
 
+/**
+ * A label/value row. It follows the width of its panel, not of the window
+ * (a container query): in a narrow panel the label goes above the value.
+ */
 export function Row({ label, children, action, align = 'center' }: { label: React.ReactNode; children: React.ReactNode; action?: React.ReactNode; align?: 'center' | 'flex-start' }) {
   const t = useTokens();
   return (
-    <Box sx={{ display: 'flex', alignItems: align, gap: 2, py: 1, borderTop: `1px solid ${t.rule}`, '&:first-of-type': { borderTop: 'none' }, flexWrap: { xs: 'wrap', sm: 'nowrap' } }}>
-      <Box sx={{ width: { xs: '100%', sm: 170 }, flex: 'none', color: t.muted, fontSize: 13.5 }}>{label}</Box>
-      <Box sx={{ flex: 1, minWidth: 0, fontSize: 14, ...tabular }}>{children}</Box>
-      {action}
+    <Box sx={{ containerType: 'inline-size', borderTop: `1px solid ${t.rule}`, '&:first-of-type': { borderTop: 'none' } }}>
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: align,
+          gap: 2,
+          py: 1,
+          '& > .hangar-row-label': { width: 170, flex: 'none', color: t.muted, fontSize: 13.5 },
+          '& > .hangar-row-value': { flex: 1, minWidth: 0, fontSize: 14, ...tabular },
+          // Narrow panel: label and action on the first line, the value below at full width.
+          '@container (max-width: 520px)': {
+            flexWrap: 'wrap',
+            rowGap: 0.5,
+            '& > .hangar-row-label': { flex: 1, width: 'auto' },
+            '& > .hangar-row-action': { order: 2 },
+            '& > .hangar-row-value': { order: 3, flexBasis: '100%' },
+          },
+        }}
+      >
+        <Box className="hangar-row-label">{label}</Box>
+        <Box className="hangar-row-value">{children}</Box>
+        {action && <Box className="hangar-row-action">{action}</Box>}
+      </Box>
     </Box>
   );
 }
