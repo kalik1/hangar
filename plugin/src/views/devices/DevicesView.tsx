@@ -23,7 +23,7 @@ import * as H from '../../api/hardware';
 import { NOT_ALLOWED, useCan } from '../../api/permissions';
 import { availability, Mapping, mappingsOf, passthroughEnabled, pciName, usbName, vmsUsingResource, withDeviceKinds } from '../../model/hardware';
 import { Obj } from '../../model/types';
-import { hrefFor } from '../../shell/nav';
+import { gateHref,hrefFor } from '../../shell/nav';
 import { useK8s } from '../../shell/settings';
 import { Column, DataTable } from '../../ui/DataTable';
 import { confirm, openDialog } from '../../ui/dialogs';
@@ -224,7 +224,8 @@ export function DevicesView() {
           Device passthrough is off in KubeVirt (feature gate HostDevices).{' '}
           <Button size="small" sx={{ textTransform: 'none', p: 0, minWidth: 0, verticalAlign: 'baseline' }} disabled={!canMap} onClick={() => quiet(H.turnOnPassthrough(kv))}>
             Turn it on
-          </Button>
+          </Button>{' '}
+          or see <RouterLink to={gateHref('HostDevices')}>Features</RouterLink>.
         </Note>
       )}
       {agents.missing && (

@@ -13,6 +13,7 @@ import Switch from '@mui/material/Switch';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import React from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import { useHistory } from 'react-router-dom';
 import { kreq } from '../../api/client';
 import { useHangar } from '../../api/data';
@@ -41,7 +42,7 @@ import {
 } from '../../model/hardware';
 import { Obj } from '../../model/types';
 import { formatAge, formatBytes } from '../../model/units';
-import { hrefFor } from '../../shell/nav';
+import { gateHref,hrefFor } from '../../shell/nav';
 import { useK8s } from '../../shell/settings';
 import { confirm, openDialog } from '../../ui/dialogs';
 import { Empty, K8sName, KV, Panel, Tag } from '../../ui/kit';
@@ -336,7 +337,8 @@ export function HardwareTab({ host }: { host: string }) {
               Device passthrough is off in KubeVirt.{' '}
               <Button size="small" sx={{ textTransform: 'none', p: 0, minWidth: 0, verticalAlign: 'baseline' }} disabled={!canMap} onClick={() => quiet(H.turnOnPassthrough(kv))}>
                 Turn it on
-              </Button>
+              </Button>{' '}
+              or see <RouterLink to={gateHref('HostDevices')}>Features</RouterLink>.
             </Note>
           )}
           <KV

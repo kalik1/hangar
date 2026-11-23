@@ -38,6 +38,7 @@ import { useK8s } from '../../shell/settings';
 import { openDialog } from '../../ui/dialogs';
 import { K8sName } from '../../ui/kit';
 import { useTokens } from '../../ui/useTokens';
+import { GateHint } from '../settings/GateHint';
 import { Note } from '../storage/parts';
 
 export interface SnapshotSupportState extends Support {
@@ -94,6 +95,7 @@ export function MissingList({ s }: { s: SnapshotSupportState }) {
           <Box>
             <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{m.title}</Typography>
             <Typography sx={{ fontSize: 13, color: t.muted }}>{m.fix}</Typography>
+            {m.gate && <GateHint gate={m.gate} sx={{ mt: 0.5 }}>Turn it on in Datacenter settings.</GateHint>}
           </Box>
         </Box>
       ))}

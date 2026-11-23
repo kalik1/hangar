@@ -19,6 +19,7 @@ import { confirm } from '../../ui/dialogs';
 import { K8sName, Panel } from '../../ui/kit';
 import { Led } from '../../ui/Led';
 import { useTokens } from '../../ui/useTokens';
+import { GateHint } from '../settings/GateHint';
 
 /** Asks before turning on KubeVirt's Sidecar feature gate; false when cancelled. */
 export async function confirmSidecarGate(): Promise<boolean> {
@@ -106,6 +107,7 @@ export function ClipboardPanel({ vm }: { vm: Obj }) {
         Windows: spice-guest-tools) and a logged-in desktop. A change applies at the next power-on.
         {why && wanted === false ? ` ${why}.` : ''}
       </Typography>
+      {!gateOn && !wanted && <GateHint gate="Sidecar" sx={{ mt: 0.5 }}>KubeVirt&apos;s Sidecar feature is off in this datacenter{canGate ? ': turning clipboard sharing on turns it on.' : '.'}</GateHint>}
       {k8s && (
         <Box sx={{ mt: 1, display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
           <K8sName>{HOOK_ANNOTATION}</K8sName>

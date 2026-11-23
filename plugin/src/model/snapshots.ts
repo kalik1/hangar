@@ -139,7 +139,8 @@ export interface Support {
   /** Snapshots can be taken. */
   ok: boolean;
   /** What is missing on the cluster, in words, with the fix. */
-  missing: { title: string; fix: string }[];
+  /** What is missing, with the fix; `gate` when a KubeVirt feature gate is off (Settings → Features). */
+  missing: { title: string; fix: string; gate?: string }[];
   /** Disks a snapshot leaves out because their datastore has no snapshot class. */
   uncovered: string[];
 }
@@ -173,6 +174,7 @@ export function snapshotSupport(p: {
     missing.push({
       title: 'Turn on the Snapshot feature of KubeVirt',
       fix: `Add "Snapshot" to spec.configuration.developerConfiguration.featureGates of the KubeVirt resource.${p.gateMessage ? ` KubeVirt says: ${p.gateMessage}` : ''}`,
+      gate: 'Snapshot',
     });
   const ns = p.vm.metadata.namespace as string;
   const uncovered: string[] = [];
