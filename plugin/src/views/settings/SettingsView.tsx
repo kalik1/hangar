@@ -226,11 +226,7 @@ function GateLine({ r, d, kv, canPatch, k4all, focus }: { r: GateRow; d: HangarD
           <K8sName>{r.name}</K8sName>
           <MaturityTag m={r.maturity} />
           {r.feature && <span>{r.feature.where}</span>}
-          {users.length > 0 && (
-            <span>
-              · used by {users.length} VM{users.length > 1 ? 's' : ''}
-            </span>
-          )}
+          {users.length > 0 && <Tag>{users.length} VM{users.length > 1 ? 's use' : ' uses'} it</Tag>}
         </Box>
         {(r.note || (r.feature?.note && r.on !== true)) && <Box sx={{ fontSize: 12.5, color: r.note ? '#B7791F' : t.muted, mt: 0.5 }}>{r.note ?? r.feature?.note}</Box>}
         {k8s && r.listed && r.maturity === 'GA' && <Box sx={{ fontSize: 12.5, color: t.muted, mt: 0.25 }}>Listed in developerConfiguration.featureGates</Box>}

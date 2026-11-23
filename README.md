@@ -18,7 +18,9 @@ names, related objects, YAML).
 | VMs | Power on, shut down (guest), restart (guest), suspend, resume, power off, reset; bulk actions; right-click menu |
 | Console | Graphical (VNC) and serial consoles, in the page or in windows; Ctrl+Alt+Del and special keys; type text into the guest; screenshots; live thumbnails |
 | Create | Wizard: library image, ISO install, disk image URL, container registry, empty disk; CPU/memory or size profile; firmware, Secure Boot, TPM; disks and datastore; networks; cloud-init |
-| Configure | CPU, memory, size profile, firmware; add, attach, expand, eject, remove disks and CD/DVDs; network adapters (network, model, link); boot order; power policy; behaviour on host maintenance; shutdown timeout; host pinning; tags; cloud-init; notes |
+| Configure | CPU, memory, size profile, firmware, persistent UEFI variables and TPM; CPU flags, reservation and limits, hot-add of CPUs and memory; add, attach, expand, eject, remove disks and CD/DVDs, also while the VM runs (hot-plug); disk cache, I/O mode, I/O threads, serial, read-only, shareable, error policy, block size; network adapters (network, model, link up/down, multi-queue); devices (headless, video card, audio, RNG, watchdog, crash reports, VSOCK, host metrics); shared folders (virtiofs); boot order; power policy; behaviour on host maintenance; shutdown timeout; host pinning; tags; cloud-init; notes |
+| Options | Delete protection, start paused, guest clock (UTC, time zone, offset), tablet pointer, ACPI, SMBIOS (UUID, serial, chassis), guest OS tuning |
+| Settings | KubeVirt's features (feature gates) in plain words: on or off, maturity per KubeVirt version, what each unlocks, the cluster settings they need; turn them on and off; the delete protection policy |
 | Copies | Clone, clone to template, new VM from template (disks copied, new MACs and hostname) |
 | Snapshots | Take, revert, delete |
 | Hosts | State, hardware, usage, VMs; maintenance mode with live evacuation |
@@ -44,6 +46,10 @@ names, related objects, YAML).
 | VolumeSnapshot CRDs, a snapshot controller and KubeVirt's `Snapshot` feature gate | Snapshots |
 | Hangar's node agent (below), IOMMU on the hosts | Host devices (PCI, GPU, USB passthrough, host disks) |
 | KubeVirt's `Sidecar` feature gate, spice-vdagent in the guest | Clipboard sharing with the console (below) |
+| KubeVirt's `DeclarativeHotplugVolumes` feature gate (not with `HotplugVolumes`) | Disks and CD/DVD media in and out of a running VM |
+| KubeVirt's `ExpandDisks`, `VideoConfig`, `PanicDevices`, `VSOCK`, `DownwardMetrics`, `EnableVirtioFsStorageVolumes`/`EnableVirtioFsConfigVolumes` feature gates | A running guest sees a disk grow; video card choice; crash reports; VSOCK; host metrics; shared folders |
+| The `LiveMigrate` workload update method in the KubeVirt resource | Adding CPUs and memory to a running VM, live disk moves |
+| Kubernetes 1.30 or newer and `distribution/protection-policy.yaml` | Delete protection (below) |
 | TopoLVM, Rook-Ceph (optional) | Per-host thin pools; Ceph pool capacity and links to [Cairn](https://github.com/kalik1/cairn) |
 
 Without an optional part, Hangar says what is missing instead of offering
@@ -169,6 +175,37 @@ script in a ConfigMap of the VM's folder) that gives the VM a
 
 On plain http the browser lets Hangar write your clipboard only right after
 a key press or click in the console.
+
+### KubeVirt features
+
+Settings → Features lists KubeVirt's feature gates in plain words: on or
+off, how mature each one is (GA features are always on; Alpha and Beta ones
+only when listed in the KubeVirt resource), what it unlocks in Hangar and
+which VMs use it, next to the cluster settings some of them need
+(LiveMigrate updates, live updates, hot-add ceilings, where UEFI and TPM
+state is kept, the default behaviour on host maintenance). The maturity
+table is per KubeVirt version (v1.7, taken from its source); for another
+version Hangar says the maturity is unknown. A user who may patch the
+KubeVirt resource turns a feature on or off there: Hangar changes only the
+feature gate list, read fresh before writing, and never writes
+`HotplugVolumes` together with `DeclarativeHotplugVolumes`. Controls
+elsewhere that need a feature that is off are disabled with the reason and
+a link to it.
+
+### Delete protection
+
+Configure → Options → Protection is Proxmox's protection flag: nobody can
+delete the VM or its disks (from Hangar, kubectl, or by deleting the
+folder) until it is turned off. Hangar labels the VM and its disks
+`hangar.magesgate.com/protected=true`; a ValidatingAdmissionPolicy refuses
+the delete. The label alone protects nothing, so Hangar offers the switch
+only when the policy is installed (Settings → Delete protection says so):
+
+```bash
+kubectl apply -f distribution/protection-policy.yaml
+```
+
+Remove it with `kubectl delete -f distribution/protection-policy.yaml`.
 
 ### On k4all
 

@@ -448,11 +448,12 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
   const cs = clusterSettings(d.kubevirt);
   const vmiCpu = vmi?.spec?.domain?.cpu;
   const vmiMax = vmi?.spec?.domain?.memory?.maxGuest;
+  const growOff = !(cs.liveMigrateUpdates && cs.rollout === 'LiveUpdate');
   const hotAddText = hw.instancetype
     ? 'From the flavor'
-    : `Up to ${vmiCpu?.maxSockets ?? lim.maxSockets ?? `${cs.maxHotplugRatio}×`} sockets and ${vmiMax ?? lim.maxGuest ?? `${cs.maxHotplugRatio}×`} of memory while running${
-        cs.liveMigrateUpdates && cs.rollout === 'LiveUpdate' ? '' : ' (off in this datacenter: Settings)'
-      }`;
+    : `Up to ${vmiCpu?.maxSockets ?? lim.maxSockets ?? cs.maxCpuSockets ?? hw.sockets * cs.maxHotplugRatio} sockets and ${
+        vmiMax ?? lim.maxGuest ?? formatBytes(hw.memoryBytes * cs.maxHotplugRatio)
+      } of memory while running${growOff ? ' (needs LiveMigrate updates: Settings)' : ''}`;
   const mq = O.deviceOptions(vm).nicMultiQueue;
 
   /* boot order */

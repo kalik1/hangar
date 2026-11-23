@@ -25,7 +25,7 @@ import { GateHint } from '../settings/GateHint';
 import { Help, Later, NotInKubevirt, quiet, Row, saveVm } from './configParts';
 
 const VIDEO: { value: O.VideoType; label: string }[] = [
-  { value: '', label: 'Default (VGA for BIOS, Bochs for UEFI)' },
+  { value: '', label: 'Default (VGA; Bochs with UEFI)' },
   { value: 'virtio', label: 'VirtIO GPU' },
   { value: 'vga', label: 'Standard VGA' },
   { value: 'bochs', label: 'Bochs' },

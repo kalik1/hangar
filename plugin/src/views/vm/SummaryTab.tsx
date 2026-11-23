@@ -14,6 +14,7 @@ import { useHangar, useTasks } from '../../api/data';
 import { useGuestInfo } from '../../api/guest';
 import { last, useMetrics } from '../../api/metrics';
 import { liveGate } from '../../model/placement';
+import { isProtected } from '../../model/protection';
 import { Obj } from '../../model/types';
 import { formatBytes, formatCores, parseQuantity, pct } from '../../model/units';
 import {
@@ -30,6 +31,7 @@ import {
   runStrategyLabel,
   tags,
 } from '../../model/vm';
+import { deviceOptions, sharesOf, startPaused } from '../../model/vmoptions';
 import { hrefFor } from '../../shell/nav';
 import { useK8s } from '../../shell/settings';
 import { TaskRows } from '../../shell/TasksDock';
@@ -38,6 +40,23 @@ import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
 import { vmOs } from '../os';
 import { useVmDeviceRows } from './DevicesSection';
+
+/** The VM's extra devices in words (Configure → Devices, Shared folders). */
+function deviceWords(vm: Obj): string {
+  const o = deviceOptions(vm);
+  const out: string[] = [];
+  out.push(o.graphics ? (o.video ? `${o.video} video` : 'graphics') : 'headless');
+  if (o.sound) out.push(`audio (${o.sound})`);
+  if (o.rng) out.push('RNG');
+  if (o.watchdog) out.push(`watchdog (${o.watchdog})`);
+  if (o.panic) out.push('crash reports');
+  if (o.vsock) out.push('VSOCK');
+  if (o.downwardMetrics) out.push('host metrics');
+  const shares = sharesOf(vm).length;
+  if (shares) out.push(`${shares} shared folder${shares > 1 ? 's' : ''}`);
+  if (startPaused(vm)) out.push('starts paused');
+  return out.join(', ');
+}
 
 function NotesEditor({ vm }: { vm: Obj }) {
   const t = useTokens();
@@ -147,6 +166,7 @@ export function SummaryTab({ vm }: { vm: Obj }) {
                 : []),
               ['Firmware', `${hw.firmware}${hw.tpm ? ', TPM' : ''}`],
               ...(hw.gpus || hw.hostDevices ? ([['Passthrough', `${hw.gpus} GPU, ${hw.hostDevices} host devices`]] as [React.ReactNode, React.ReactNode][]) : []),
+              ['Devices', deviceWords(vm)],
             ]}
           />
           <Box component="table" sx={{ width: '100%', mt: 2, fontSize: 13.5, borderCollapse: 'collapse', ...tabular, '& td, & th': { py: 0.5, pr: 1.5, textAlign: 'left', borderTop: `1px solid ${t.rule}` }, '& th': { color: t.muted, fontWeight: 600, fontSize: 12.5, borderTop: 'none' } }}>
@@ -273,6 +293,7 @@ export function SummaryTab({ vm }: { vm: Obj }) {
               ],
               [k8s ? 'Namespace' : 'Folder', vm.metadata.namespace],
               ['Power policy', runStrategyLabel(runStrategy(vm))],
+              ['Delete protection', isProtected(vm) ? 'On: the VM and its disks cannot be deleted' : 'Off'],
               ['On host maintenance', EVICTION_LABELS[evictionStrategy(vm, d.kubevirt)] ?? evictionStrategy(vm, d.kubevirt)],
               ['Live migration', vmi ? (lm.ok ? 'Possible' : `Not possible. ${lm.why}`) : '—'],
               ['Snapshots', d.has.snapshots ? `${snaps.length}` : 'Not available on this cluster'],
