@@ -104,7 +104,8 @@ function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: ()
   const [cores, setCores] = React.useState(hw.cores);
   const [threads, setThreads] = React.useState(hw.threads);
   const [mem, setMem] = React.useState(String(+(hw.memoryBytes / GiB).toFixed(2)));
-  const [fw, setFw] = React.useState<'bios' | 'uefi' | 'uefi-secure'>(hw.firmware === 'BIOS' ? 'bios' : hw.firmware === 'UEFI' ? 'uefi' : 'uefi-secure');
+  const fwNow: 'bios' | 'uefi' | 'uefi-secure' = hw.firmware === 'BIOS' ? 'bios' : hw.firmware === 'UEFI' ? 'uefi' : 'uefi-secure';
+  const [fw, setFw] = React.useState<'bios' | 'uefi' | 'uefi-secure'>(fwNow);
   const [tpm, setTpm] = React.useState(hw.tpm);
   const persist = O.persistenceOf(vm);
   const [efiKeep, setEfiKeep] = React.useState(persist.efi);
@@ -127,12 +128,21 @@ function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: ()
       ? O.liveCompute(vmi, { sockets, cores, threads, memoryBytes: memBytes }, { liveUpdate: cs.rollout === 'LiveUpdate', liveMigrateUpdates: cs.liveMigrateUpdates, migratable: liveMigratable(vm, vmi) })
       : null;
   const save = () => {
-    let next = mode === 'profile' ? setFlavor(vm, { kind: profileKind, name: profile }) : E.setCompute(vm, { sockets, cores, threads, memoryBytes: memBytes });
-    next = E.setFirmware(next, fw, tpm);
-    next = O.setPersistence(next, { efi: fw !== 'bios' && efiKeep, tpm: tpmKeep });
-    if (mode === 'custom') next = O.setHotAddLimits(next, { maxSockets: maxSockets.trim() ? Number(maxSockets) : null, maxGuestBytes });
+    // Touch only what changed: any other edit of the template (even writing the
+    // BIOS default) makes KubeVirt ask for a restart and skip the hot-add.
+    const sizeChanged =
+      mode === 'profile'
+        ? !hw.instancetype || hw.instancetype.name !== profile || hw.instancetype.kind !== profileKind
+        : !!hw.instancetype || sockets !== hw.sockets || cores !== hw.cores || threads !== hw.threads || Math.abs(memBytes - hw.memoryBytes) >= 1;
+    let next = !sizeChanged ? vm : mode === 'profile' ? setFlavor(vm, { kind: profileKind, name: profile }) : E.setCompute(vm, { sockets, cores, threads, memoryBytes: memBytes });
+    if (fw !== fwNow || tpm !== hw.tpm) next = E.setFirmware(next, fw, tpm);
+    if ((fw !== 'bios' && efiKeep) !== persist.efi || (tpm && tpmKeep) !== persist.tpm) next = O.setPersistence(next, { efi: fw !== 'bios' && efiKeep, tpm: tpmKeep });
+    const newMaxSockets = maxSockets.trim() ? Number(maxSockets) : null;
+    if (mode === 'custom' && (newMaxSockets !== (limits.maxSockets ?? null) || maxGuestBytes !== (limits.maxGuest ? parseQuantity(limits.maxGuest) : null)))
+      next = O.setHotAddLimits(next, { maxSockets: newMaxSockets, maxGuestBytes });
     // A flavor that sets the CPU model forbids the VM's own (KubeVirt rejects the conflict).
-    next = setCpuModel(next, flavorModel ? '' : cpuModel);
+    const model = flavorModel ? '' : cpuModel;
+    if (model !== ownModel) next = setCpuModel(next, model);
     quiet(saveVm(vm, 'Change CPU and memory', next));
     onClose();
   };
