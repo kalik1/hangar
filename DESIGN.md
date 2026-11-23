@@ -113,7 +113,20 @@ history keeps growing, the tasks keep being followed.
     Shared folders (virtiofs from a disk, ConfigMap or Secret, with the
     guest's mount command); vGPU display and boot framebuffer for mediated
     GPUs; Options (delete protection, start paused, clock, tablet pointer,
-    ACPI, SMBIOS, guest OS tuning). Controls whose KubeVirt feature gate is
+    ACPI, SMBIOS, guest OS tuning); machine type (`domain.machine.type`:
+    the types the hosts report through machine-type.node.kubevirt.io that
+    match the KubeVirt resource's emulatedMachines, else KubeVirt's
+    defaults q35*/pc-q35*, with the datacenter default; restart-only; a
+    running VM keeps its resolved type when it moves, because its pod asks
+    for hosts that offer it). Pod-network adapters: the NAT range
+    (`networks[].pod.vmNetworkCIDR`, KubeVirt's default 10.0.2.0/24) must
+    not overlap a host's pod range (CiliumNode spec.ipam.podCIDRs, else
+    Node podCIDRs, else pod addresses), the service range (ServiceCIDR,
+    else a /16 around the kubernetes Service) or a host address, or the VM
+    cannot reach them (k4all #72: a Cilium host's pods in 10.0.2.0/24). The
+    wizard picks 10.0.2.0/24 when free, else 172.31.254.0/24 downwards
+    (shown behind the Kubernetes switch); Configure warns about an
+    overlapping adapter with a fix (next restart). Controls whose KubeVirt feature gate is
     off are disabled with one line and a link to Settings → Features, but
     can always be turned off. Where Proxmox has an option KubeVirt lacks
     (start order, KVM on/off, SPICE, hibernation, disk QoS and SSD
@@ -484,9 +497,17 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
   a drive live); SATA disks cannot be hot-plugged. KubeVirt keeps a disk it
   created after the disk leaves the VM (owned by the VM): Hangar deletes it
   when asked, or drops the ownership to keep it.
+- Hot-added CPUs reach the guest at once, but some Linux guests (Fedora
+  cloud images) leave them offline until `echo 1 >
+  /sys/devices/system/cpu/cpuN/online`; hot-added memory (virtio-mem) is
+  onlined by the guest. The CPU and memory dialog writes only what changed:
+  any other template change (even the BIOS default) makes KubeVirt ask for
+  a restart and skip the hot-add.
+- Persistent UEFI/TPM state on an RWO datastore does not stop live moves:
+  KubeVirt v1.7 copies it to a new disk for the target host (tested).
 - CPU and memory hot-add need the VM to move live (KubeVirt migrates it to
-  resize it): VMs on single-host disks, with host devices or with a
-  persistent TPM on an RWO datastore grow at their next restart. Only
+  resize it): VMs on single-host disks or with host devices grow at their
+  next restart. Only
   sockets can be added; memory needs at least 1 GiB, goes in 2 MiB blocks,
   and cannot go below the size at power-on while running.
 - Feature gate maturity is known per KubeVirt minor version (v1.7 today);

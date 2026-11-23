@@ -210,6 +210,12 @@ function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: ()
                 {live.why.map(w => (
                   <Help key={w}>{w}</Help>
                 ))}
+                {live.cpu === 'live' && (
+                  <Help>
+                    The guest gets the new CPUs at once; some Linux guests (Fedora cloud images, for one) still have to bring them online: echo 1 &gt;
+                    /sys/devices/system/cpu/cpuN/online. Windows and RHEL do it themselves.
+                  </Help>
+                )}
                 {(live.cpu === 'live' || live.memory === 'live') && mixedMakers && (
                   <Help tone="warn">
                     KubeVirt grows a running VM by moving it live to another host. This datacenter mixes Intel and AMD hosts: with a CPU model both makers offer, the move may cross makers, which QEMU does not support (the guest can freeze). Pin the VM to one maker&apos;s hosts first, or restart instead.

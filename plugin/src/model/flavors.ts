@@ -539,6 +539,10 @@ export function vendors(cpus: HostCpu[]): string[] {
  * SandyBridge moved live Intel → AMD → Intel and kept running (uptime,
  * AES-NI). QEMU does not officially support it and the guest keeps the CPU
  * maker it booted with, so Hangar allows it and says so.
+ * On 2026-11-23 one Fedora 45 VM booted on AMD (SandyBridge) froze after a
+ * live move to Intel (a CPU hot-add move): vCPUs idle, guest agent silent.
+ * Four more AMD → Intel moves (plain, hot-add, with the same devices, with
+ * VSOCK) kept running, so the verdict stays; the hot-add dialog still warns.
  */
 export const CROSS_VENDOR_LIVE = true;
 

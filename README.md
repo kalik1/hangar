@@ -19,7 +19,8 @@ names, related objects, YAML).
 | Console | Graphical (VNC) and serial consoles, in the page or in windows; Ctrl+Alt+Del and special keys; type text into the guest; screenshots; live thumbnails |
 | Create | Wizard: library image, ISO install, disk image URL, container registry, empty disk; CPU/memory or size profile; firmware, Secure Boot, TPM; disks and datastore; networks; cloud-init |
 | Configure | CPU, memory, size profile, firmware, persistent UEFI variables and TPM; CPU flags, reservation and limits, hot-add of CPUs and memory; add, attach, expand, eject, remove disks and CD/DVDs, also while the VM runs (hot-plug); disk cache, I/O mode, I/O threads, serial, read-only, shareable, error policy, block size; network adapters (network, model, link up/down, multi-queue); devices (headless, video card, audio, RNG, watchdog, crash reports, VSOCK, host metrics); shared folders (virtiofs); boot order; power policy; behaviour on host maintenance; shutdown timeout; host pinning; tags; cloud-init; notes |
-| Options | Delete protection, start paused, guest clock (UTC, time zone, offset), tablet pointer, ACPI, SMBIOS (UUID, serial, chassis), guest OS tuning |
+| Options | Delete protection, start paused, guest clock (UTC, time zone, offset), tablet pointer, ACPI, SMBIOS (UUID, serial, chassis), guest OS tuning; machine type (the versions the hosts offer and KubeVirt accepts) |
+| Networking | The NAT range of pod-network adapters (vmNetworkCIDR) avoids the cluster's pod, service and host ranges (a VM on a host whose pods use 10.0.2.0/24 could not reach them); Configure fixes existing VMs |
 | Settings | KubeVirt's features (feature gates) in plain words: on or off, maturity per KubeVirt version, what each unlocks, the cluster settings they need; turn them on and off; the delete protection policy |
 | Copies | Clone, clone to template, new VM from template (disks copied, new MACs and hostname) |
 | Snapshots | Take, revert, delete |
@@ -206,6 +207,13 @@ kubectl apply -f distribution/protection-policy.yaml
 ```
 
 Remove it with `kubectl delete -f distribution/protection-policy.yaml`.
+
+Deleting a namespace that holds protected VMs or disks stops halfway: it
+stays in Terminating until their protection is turned off. Headlamp's
+Namespace page shows a "Protected from deletion (Hangar)" section with them
+before you delete; Hangar itself offers no folder delete. CDI's temporary
+claims (labelled `cdi.kubevirt.io/OwnedByUID`) copy the label and are left
+deletable by the policy.
 
 ### On k4all
 
