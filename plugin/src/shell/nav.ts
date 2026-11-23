@@ -22,9 +22,10 @@ export type View =
   | 'library'
   | 'tasks'
   | 'devices'
-  | 'flavors';
+  | 'flavors'
+  | 'settings';
 
-const VIEWS: View[] = ['dashboard', 'vms', 'vm', 'templates', 'hosts', 'host', 'storage', 'networks', 'library', 'tasks', 'devices', 'flavors'];
+const VIEWS: View[] = ['dashboard', 'vms', 'vm', 'templates', 'hosts', 'host', 'storage', 'networks', 'library', 'tasks', 'devices', 'flavors', 'settings'];
 
 export interface Nav {
   view: View;
@@ -57,6 +58,9 @@ export function useNav(): Nav {
     go: (v, a, b, c) => history.push(hrefFor(v, a, b, c)),
   };
 }
+
+/** Datacenter settings → Features, with a gate highlighted. */
+export const gateHref = (gate?: string) => hrefFor('settings', 'features', gate);
 
 /** Links to a VM's page and tab. */
 export const vmHref = (ns: string, name: string, tab?: string) => hrefFor('vm', ns, name, tab);

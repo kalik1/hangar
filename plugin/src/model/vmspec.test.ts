@@ -59,6 +59,20 @@ describe('buildVm', () => {
     expect(d.devices.tpm).toEqual({ persistent: true });
     expect(vm.spec.template.spec.networks).toEqual([{ name: 'lan', multus: { networkName: 'prod/vlan10' } }]);
   });
+  it('creates a protected, paused, headless VM with a sound card', () => {
+    const vm = buildVm({ ...base, protected: true, startPaused: true, headless: true, sound: 'ich9' });
+    expect(vm.metadata.labels['hangar.magesgate.com/protected']).toBe('true');
+    expect(vm.spec.dataVolumeTemplates[0].metadata.labels).toEqual({ 'hangar.magesgate.com/protected': 'true' });
+    const t = vm.spec.template.spec;
+    expect(t.startStrategy).toBe('Paused');
+    expect(t.domain.devices.autoattachGraphicsDevice).toBe(false);
+    expect(t.domain.devices.inputs).toBeUndefined();
+    expect(t.domain.devices.sound).toEqual({ name: 'sound', model: 'ich9' });
+    const plain = buildVm(base);
+    expect(plain.metadata.labels['hangar.magesgate.com/protected']).toBeUndefined();
+    expect(plain.spec.template.spec.startStrategy).toBeUndefined();
+    expect(plain.spec.template.spec.domain.devices.inputs).toHaveLength(1);
+  });
   it('writes cloud-config with keys and password', () => {
     const u = cloudInitUserData({ user: 'admin', password: 'p"w', sshKeys: ['k1', ' '] }, 'h');
     expect(u).toContain('user: admin');

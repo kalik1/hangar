@@ -52,6 +52,8 @@ export function TaskTarget({ task }: { task: Task }) {
       ? hrefFor('devices')
       : tg.kind === 'flavor'
       ? hrefFor('flavors')
+      : tg.kind === 'datacenter'
+      ? hrefFor('settings')
       : undefined;
   const text = tg.namespace && tg.kind !== 'folder' ? `${tg.name}` : tg.name;
   return href ? (

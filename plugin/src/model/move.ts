@@ -14,6 +14,7 @@
  */
 
 import { clone } from './edit';
+import { isProtected, PROTECTED_LABEL } from './protection';
 import { Until, UntilWorld, volumesChanging } from './tasks';
 import { Obj } from './types';
 import { slugify } from './vmspec';
@@ -66,6 +67,8 @@ export function newDiskObject(vm: Obj, m: DiskMove, name: string, live: boolean)
     metadata: {
       name,
       namespace: ns,
+      // A protected VM's new disk is protected too.
+      ...(isProtected(vm) ? { labels: { [PROTECTED_LABEL]: 'true' } } : {}),
       annotations: { [A_MOVED_FROM]: m.root ?? m.claim, 'cdi.kubevirt.io/storage.bind.immediate.requested': 'true' },
       ...(vm.metadata.uid
         ? {
@@ -93,7 +96,7 @@ export function swapDisks(vm: Obj, moves: { move: DiskMove; newName: string; spe
     const hotpluggable = old.dataVolume?.hotpluggable ?? old.persistentVolumeClaim?.hotpluggable;
     vols[i] = { name: move.volume, dataVolume: { name: newName, ...(hotpluggable ? { hotpluggable: true } : {}) } };
     templates = templates.filter(d => d.metadata?.name !== move.claim);
-    templates.push({ metadata: { name: newName }, spec });
+    templates.push({ metadata: { name: newName, ...(isProtected(vm) ? { labels: { [PROTECTED_LABEL]: 'true' } } : {}) }, spec });
   }
   t.volumes = vols;
   out.spec.dataVolumeTemplates = templates;

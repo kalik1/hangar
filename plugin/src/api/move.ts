@@ -12,6 +12,7 @@ import { Task, tasks, UntilWorld } from '../model/tasks';
 import { Obj, VM } from '../model/types';
 import { runTask } from './actions';
 import { errorText, kdelete, kpost, kput, kreq } from './client';
+import { labelDisks } from './protection';
 import { PATHS } from './resources';
 
 /**
@@ -153,6 +154,8 @@ export function advanceDiskMove(t: Task, w: UntilWorld) {
     // cleanup: the old disks, DataVolume first (else CDI recreates the claim).
     const gone = (e: any) => (e?.status === 404 ? undefined : Promise.reject(e));
     for (const m of u.moves) {
+      // The old disk of a protected VM carries the protection label; its data lives on in the new (protected) disk.
+      await labelDisks(u.namespace, [m.claim], false).catch(() => undefined);
       await kdelete(PATHS.dv(u.namespace, m.claim)).catch(gone);
       await kdelete(PATHS.pvc(u.namespace, m.claim)).catch(gone);
     }

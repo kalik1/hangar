@@ -13,10 +13,13 @@ import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import React from 'react';
 import { Link as RouterLink } from 'react-router-dom';
+import { runTask } from '../../api/actions';
 import { HangarData } from '../../api/data';
+import { labelDisks } from '../../api/protection';
 import { deleteDisk } from '../../api/storage';
 import { rbdImageOf, snapshotsByClaim } from '../../model/datastoreSpec';
 import { claimLocality, localityLabel } from '../../model/placement';
+import { isProtected } from '../../model/protection';
 import { DiskInventory, DiskRow, expandProblem, requestedSize } from '../../model/storage';
 import { formatBytes } from '../../model/units';
 import { hrefFor } from '../../shell/nav';
@@ -298,9 +301,12 @@ function DiskTable({
       width: 168,
       cell: r => {
         const problem = expandProblem(r, scOf(r));
+        const prot = isProtected(r.pvc) || isProtected(r.dv);
         const delWhy =
           r.kind === 'unattached'
-            ? undefined
+            ? prot
+              ? 'Protected from deletion: remove its protection first'
+              : undefined
             : r.kind === 'vm'
             ? `Attached to ${r.uses.map(u => u.vm.metadata.name).join(', ')}: remove it from the VM first`
             : r.kind === 'image'
@@ -324,6 +330,21 @@ function DiskTable({
               disabled={!!problem}
               onClick={() => openDialog(close => <ExpandDiskDialog row={r} d={d} onClose={close} />)}
             />
+            {prot && r.kind === 'unattached' && (
+              <IconAction
+                icon="mdi:shield-off-outline"
+                label={`Remove the delete protection of ${r.name}`}
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: `Remove the delete protection of ${r.name}?`,
+                    body: <p>The disk is no longer attached to a VM. Without protection it can be deleted.</p>,
+                    confirm: 'Remove protection',
+                    danger: true,
+                  });
+                  if (ok) runTask({ title: 'Remove delete protection', target: { kind: 'datastore', namespace: r.namespace, name: r.name } }, () => labelDisks(r.namespace, [r.name], false)).catch(() => undefined);
+                }}
+              />
+            )}
             <IconAction icon="mdi:delete-outline" label={delWhy ? `Delete ${r.name}: ${delWhy}` : `Delete ${r.name}`} disabled={!!delWhy} onClick={() => remove(r)} />
           </Box>
         );

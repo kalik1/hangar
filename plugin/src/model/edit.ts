@@ -78,9 +78,9 @@ export function deviceNames(vm: VM): string[] {
 /** A new empty disk, created by the VM (dataVolumeTemplate). */
 export function addBlankDisk(
   vm: VM,
-  d: { name?: string; sizeBytes: number; storageClass?: string; bus: string }
+  d: { name?: string; sizeBytes: number; storageClass?: string; bus: string; hotplug?: boolean }
 ): { vm: VM; name: string } {
-  const out = clone(vm);
+  const out = d.hotplug ? forHotplug(vm) : clone(vm);
   const t = tpl(out);
   const name = uniqueName(deviceNames(vm), d.name || 'disk');
   const dvName = `${vm.metadata.name}-${name}`.slice(0, 63);
@@ -95,25 +95,52 @@ export function addBlankDisk(
     },
   ];
   t.domain.devices.disks = [...(t.domain.devices.disks ?? []), { name, disk: { bus: d.bus } }];
-  t.volumes = [...(t.volumes ?? []), { name, dataVolume: { name: dvName } }];
+  t.volumes = [...(t.volumes ?? []), { name, dataVolume: { name: dvName, ...(d.hotplug ? { hotpluggable: true } : {}) } }];
   return { vm: out, name };
 }
 
 /** Attaches an existing disk (PVC) of the same folder. */
-export function attachDisk(vm: VM, claimName: string, bus: string): { vm: VM; name: string } {
-  const out = clone(vm);
+export function attachDisk(vm: VM, claimName: string, bus: string, hotplug = false): { vm: VM; name: string } {
+  const out = hotplug ? forHotplug(vm) : clone(vm);
   const t = tpl(out);
   const name = uniqueName(deviceNames(vm), claimName.replace(/^.*?-/, '').slice(0, 30) || 'disk');
   t.domain.devices.disks = [...(t.domain.devices.disks ?? []), { name, disk: { bus } }];
-  t.volumes = [...(t.volumes ?? []), { name, persistentVolumeClaim: { claimName } }];
+  t.volumes = [...(t.volumes ?? []), { name, persistentVolumeClaim: { claimName, ...(hotplug ? { hotpluggable: true } : {}) } }];
   return { vm: out, name };
 }
 
-/** Inserts an ISO of the library as a CD/DVD (a per-VM copy, so any host can mount it). */
-export function insertIso(vm: VM, iso: { namespace: string; name: string; sizeBytes: number }, boot = false): VM {
+/**
+ * A copy of the VM ready for a hot-plug edit. KubeVirt skips declarative
+ * hot-plug while spec.updateVolumesStrategy is Migration, which a live disk
+ * move leaves behind; the default (Replacement) is put back.
+ */
+export function forHotplug(vm: VM): VM {
   const out = clone(vm);
+  if (out.spec?.updateVolumesStrategy === 'Migration') delete out.spec.updateVolumesStrategy;
+  return out;
+}
+
+/** Buses a disk can be hot-plugged on (KubeVirt v1.7): VirtIO and SCSI. CD/DVD media go into an existing drive. */
+export const HOTPLUG_BUSES = ['virtio', 'scsi'];
+
+/** The volume is hot-pluggable: KubeVirt adds and removes it on the running VM. */
+export function isHotpluggable(vm: VM, name: string): boolean {
+  const v = (vm.spec?.template?.spec?.volumes ?? []).find((x: any) => x.name === name);
+  return !!(v?.dataVolume?.hotpluggable || v?.persistentVolumeClaim?.hotpluggable);
+}
+
+/** Inserts an ISO of the library as a CD/DVD (a per-VM copy, so any host can mount it). */
+export function insertIso(
+  vm: VM,
+  iso: { namespace: string; name: string; sizeBytes: number },
+  boot = false,
+  opts: { drive?: string; hotplug?: boolean } = {}
+): VM {
+  const out = opts.hotplug ? forHotplug(vm) : clone(vm);
   const t = tpl(out);
-  const name = uniqueName(deviceNames(vm), 'cdrom');
+  const disks: any[] = t.domain.devices.disks ?? [];
+  const drive = opts.drive ? disks.find(d => d.name === opts.drive && d.cdrom) : undefined;
+  const name = drive ? drive.name : uniqueName(deviceNames(vm), 'cdrom');
   const dvName = `${vm.metadata.name}-${name}`.slice(0, 63);
   out.spec.dataVolumeTemplates = [
     ...(out.spec.dataVolumeTemplates ?? []),
@@ -125,13 +152,43 @@ export function insertIso(vm: VM, iso: { namespace: string; name: string; sizeBy
       },
     },
   ];
-  const disks: any[] = t.domain.devices.disks ?? [];
   if (boot) {
-    for (const d of disks) if (d.bootOrder) d.bootOrder += 1;
+    for (const d of disks) if (d.bootOrder && d !== drive) d.bootOrder += 1;
   }
-  t.domain.devices.disks = [...disks, { name, cdrom: { bus: 'sata', readonly: true }, ...(boot ? { bootOrder: 1 } : {}) }];
-  t.volumes = [...(t.volumes ?? []), { name, dataVolume: { name: dvName } }];
+  if (drive) {
+    // Media into an empty drive: the drive stays, so a running VM gets it at once (hot-plug).
+    if (boot) drive.bootOrder = 1;
+  } else {
+    t.domain.devices.disks = [...disks, { name, cdrom: { bus: 'sata', readonly: true }, ...(boot ? { bootOrder: 1 } : {}) }];
+  }
+  t.volumes = [...(t.volumes ?? []), { name, dataVolume: { name: dvName, ...(opts.hotplug ? { hotpluggable: true } : {}) } }];
   return out;
+}
+
+/** An empty CD/DVD drive (SATA): media can then go in while the VM runs. Needs DeclarativeHotplugVolumes. */
+export function addCdromDrive(vm: VM): { vm: VM; name: string } {
+  const out = clone(vm);
+  const t = tpl(out);
+  const name = uniqueName(deviceNames(vm), 'cdrom');
+  t.domain.devices.disks = [...(t.domain.devices.disks ?? []), { name, cdrom: { bus: 'sata', readonly: true } }];
+  return { vm: out, name };
+}
+
+/**
+ * Ejects the media of a CD/DVD drive. With `keepDrive` (declarative
+ * hot-plug on) the empty drive stays, ready for the next ISO; otherwise the
+ * drive goes too. The per-VM ISO copy goes with its template.
+ */
+export function ejectCdrom(vm: VM, name: string, keepDrive: boolean): { vm: VM; claim?: string; owned: boolean } {
+  if (!keepDrive) return removeDisk(vm, name);
+  const out = forHotplug(vm);
+  const t = tpl(out);
+  const vol = (t.volumes ?? []).find((v: any) => v.name === name);
+  const claim = vol?.dataVolume?.name ?? vol?.persistentVolumeClaim?.claimName;
+  t.volumes = (t.volumes ?? []).filter((v: any) => v.name !== name);
+  const owned = !!claim && (out.spec.dataVolumeTemplates ?? []).some((d: any) => d.metadata?.name === claim);
+  if (owned) out.spec.dataVolumeTemplates = out.spec.dataVolumeTemplates.filter((d: any) => d.metadata?.name !== claim);
+  return { vm: out, claim, owned };
 }
 
 /**

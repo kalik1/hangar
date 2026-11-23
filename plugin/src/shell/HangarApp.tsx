@@ -19,6 +19,7 @@ import { FlavorsView } from '../views/flavors/FlavorsView';
 import { HostPage } from '../views/hosts/HostPage';
 import { HostsList } from '../views/hosts/HostsList';
 import { NetworksView } from '../views/networks/NetworksView';
+import { SettingsView } from '../views/settings/SettingsView';
 import { StorageView } from '../views/storage/StorageView';
 import { TasksView } from '../views/tasks/TasksView';
 import { VmPage } from '../views/vm/VmPage';
@@ -102,6 +103,8 @@ function Main() {
       return <FlavorsView section={nav.a} />;
     case 'tasks':
       return <TasksView />;
+    case 'settings':
+      return <SettingsView section={nav.a} focus={nav.b} />;
     default:
       return <Dashboard />;
   }

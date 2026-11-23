@@ -16,6 +16,7 @@ import { useHistory } from 'react-router-dom';
 import * as A from '../../api/actions';
 import { HangarData, useHangar } from '../../api/data';
 import { ALL_PERMS, NOT_ALLOWED, useVmPerms, VmPerms } from '../../api/permissions';
+import { isProtected } from '../../model/protection';
 import { Obj } from '../../model/types';
 import { isTemplate, key, powerActions, powerState, runStrategy } from '../../model/vm';
 import { hrefFor } from '../../shell/nav';
@@ -237,7 +238,8 @@ export function vmActions(
     label: tpl ? 'Delete template…' : 'Delete…',
     icon: 'mdi:delete-outline',
     group: 'danger',
-    enabled: p.kind !== 'deleting',
+    enabled: p.kind !== 'deleting' && !isProtected(vm),
+    why: isProtected(vm) ? 'Protected from deletion: turn protection off in Configure → Options first' : undefined,
     run: async () => {
       const r = await confirm({
         title: `Delete ${name}?`,

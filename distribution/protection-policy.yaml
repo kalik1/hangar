@@ -1,0 +1,52 @@
+# Hangar's delete protection: a VM, a DataVolume or a disk (PVC) labelled
+#   hangar.magesgate.com/protected: "true"
+# cannot be deleted, by Hangar, kubectl or anything else (also not by
+# deleting its namespace: the namespace stays in Terminating until the
+# protection is turned off). Hangar's Configure → Options → Protection sets
+# and removes the label on the VM and its disks; the policy enforces it.
+#
+# A ValidatingAdmissionPolicy (Kubernetes 1.30+, no webhook to run):
+#   kubectl apply -f protection-policy.yaml
+# Remove it with kubectl delete -f protection-policy.yaml.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: hangar-protect-from-deletion
+  labels: {app.kubernetes.io/part-of: hangar}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [kubevirt.io]
+        apiVersions: ['*']
+        operations: [DELETE]
+        resources: [virtualmachines]
+      - apiGroups: [cdi.kubevirt.io]
+        apiVersions: ['*']
+        operations: [DELETE]
+        resources: [datavolumes]
+      - apiGroups: ['']
+        apiVersions: [v1]
+        operations: [DELETE]
+        resources: [persistentvolumeclaims]
+    # On DELETE the selector is matched against the object being deleted.
+    objectSelector:
+      matchLabels: {hangar.magesgate.com/protected: 'true'}
+  validations:
+    - expression: >-
+        !has(oldObject.metadata.labels) ||
+        !('hangar.magesgate.com/protected' in oldObject.metadata.labels) ||
+        oldObject.metadata.labels['hangar.magesgate.com/protected'] != 'true'
+      messageExpression: >-
+        oldObject.kind + ' ' + oldObject.metadata.name +
+        ' is protected from deletion: turn protection off first (Hangar: Configure, Options; or remove the label hangar.magesgate.com/protected)'
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: hangar-protect-from-deletion
+  labels: {app.kubernetes.io/part-of: hangar}
+spec:
+  policyName: hangar-protect-from-deletion
+  validationActions: [Deny]

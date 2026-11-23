@@ -15,6 +15,7 @@ import { useHistory } from 'react-router-dom';
 import * as A from '../../api/actions';
 import { HangarData, useHangar } from '../../api/data';
 import { last, useMetrics } from '../../api/metrics';
+import { isProtected } from '../../model/protection';
 import { Obj } from '../../model/types';
 import { formatBytes, parseQuantity, pct } from '../../model/units';
 import { formatAge } from '../../model/units';
@@ -326,23 +327,30 @@ export function VmList({ folder, templates }: { folder?: string; templates?: boo
           )}
           <ToolButton
             icon="mdi:delete-outline"
-            disabled={!sel.length}
+            disabled={!sel.length || sel.every(isProtected)}
+            tooltip={sel.length && sel.every(isProtected) ? 'Protected from deletion: turn protection off in Configure → Options first' : undefined}
             onClick={async () => {
+              const prot = sel.filter(isProtected);
               const r = await confirm({
-                title: `Delete ${sel.length} ${templates ? 'template' : 'VM'}${sel.length > 1 ? 's' : ''}?`,
+                title: `Delete ${sel.length - prot.length} ${templates ? 'template' : 'VM'}${sel.length - prot.length > 1 ? 's' : ''}?`,
                 body: (
                   <>
-                    <p>{sel.map(v => v.metadata.name).join(', ')}</p>
+                    <p>{sel.filter(v => !isProtected(v)).map(v => v.metadata.name).join(', ')}</p>
                     <p>Running VMs are powered off. Disks created with them are deleted too, unless you keep them.</p>
+                    {prot.length > 0 && (
+                      <p>
+                        Protected from deletion, so kept: <b>{prot.map(v => v.metadata.name).join(', ')}</b>.
+                      </p>
+                    )}
                   </>
                 ),
                 confirm: 'Delete',
                 danger: true,
-                typeToConfirm: sel.length > 1 ? `delete ${sel.length}` : sel[0]?.metadata.name,
+                typeToConfirm: sel.length - prot.length > 1 ? `delete ${sel.length - prot.length}` : sel.find(v => !isProtected(v))?.metadata.name,
                 option: { label: 'Keep their disks' },
               });
               if (r) {
-                bulk(vm => A.deleteVm(vm, { keepDisks: r.option }));
+                bulk(vm => (isProtected(vm) ? Promise.resolve() : A.deleteVm(vm, { keepDisks: r.option })));
                 setSelected(new Set());
               }
             }}

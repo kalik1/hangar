@@ -6,6 +6,7 @@
  */
 
 import { applyDns, DnsSettings } from './dns';
+import { withVmProtection } from './protection';
 import { Obj, VM } from './types';
 import { GiB, parseQuantity, toQuantity } from './units';
 import { L_TEMPLATE } from './vm';
@@ -186,7 +187,14 @@ export interface WizardInput {
   labels?: Record<string, string>;
   /** Annotations of the VM's instances (e.g. the clipboard hook sidecar). */
   templateAnnotations?: Record<string, string>;
+  /** Power-on leaves the VM suspended (startStrategy Paused). */
   startPaused?: boolean;
+  /** Delete protection (label on the VM and its disks; enforced by the admission policy). */
+  protected?: boolean;
+  /** No graphics card: serial console only. */
+  headless?: boolean;
+  /** Sound card model. */
+  sound?: 'ich9' | 'ac97';
 }
 
 export function cloudInitUserData(c: NonNullable<WizardInput['cloudInit']>, hostname: string): string {
@@ -272,9 +280,10 @@ export function buildVm(w: WizardInput): VM {
     devices: {
       disks,
       interfaces,
-      inputs: [{ name: 'tablet', type: 'tablet', bus: 'usb' }],
+      ...(w.headless ? { autoattachGraphicsDevice: false } : { inputs: [{ name: 'tablet', type: 'tablet', bus: 'usb' }] }),
       rng: {},
       ...(w.tpm ? { tpm: { persistent: true } } : {}),
+      ...(w.sound ? { sound: { name: 'sound', model: w.sound } } : {}),
     },
   };
   if (!w.instancetype) {
@@ -297,6 +306,7 @@ export function buildVm(w: WizardInput): VM {
     terminationGracePeriodSeconds: 180,
   };
   if (w.evictionStrategy) templateSpec.evictionStrategy = w.evictionStrategy;
+  if (w.startPaused) templateSpec.startStrategy = 'Paused';
   if (w.dns) applyDns(templateSpec, w.dns);
   if (w.hostAffinity) {
     templateSpec.affinity = {
@@ -320,12 +330,13 @@ export function buildVm(w: WizardInput): VM {
   };
   if (w.instancetype) spec.instancetype = { kind: w.instancetypeKind || 'VirtualMachineClusterInstancetype', name: w.instancetype };
   if (w.preference) spec.preference = { kind: 'VirtualMachineClusterPreference', name: w.preference };
-  return {
+  const vm: VM = {
     apiVersion: 'kubevirt.io/v1',
     kind: 'VirtualMachine',
     metadata: { name: w.name, namespace: w.namespace, labels, annotations },
     spec,
   };
+  return w.protected ? withVmProtection(vm, true) : vm;
 }
 
 /** Smallest root disk that holds a source image. */

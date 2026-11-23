@@ -12,7 +12,7 @@
 export type TaskStatus = 'running' | 'done' | 'failed' | 'warning';
 
 export interface TaskTarget {
-  kind: 'vm' | 'host' | 'image' | 'datastore' | 'network' | 'folder' | 'template' | 'snapshot' | 'device' | 'flavor';
+  kind: 'vm' | 'host' | 'image' | 'datastore' | 'network' | 'folder' | 'template' | 'snapshot' | 'device' | 'flavor' | 'datacenter';
   namespace?: string;
   name: string;
 }

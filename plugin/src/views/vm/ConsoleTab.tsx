@@ -80,6 +80,17 @@ export function ConsoleTab({ vm, serial }: { vm: Obj; p: PowerState; serial?: bo
               </Box>
             </Box>
           </Box>
+        ) : !serial && vm.spec?.template?.spec?.domain?.devices?.autoattachGraphicsDevice === false ? (
+          <Box sx={{ flex: 1, minHeight: 180, display: 'grid', placeItems: 'center', background: t.chassis, color: t.chassisText, p: 3 }}>
+            <Box sx={{ textAlign: 'center', maxWidth: 460 }}>
+              <Icon icon="mdi:monitor-off" width={28} style={{ opacity: 0.8 }} />
+              <Box sx={{ fontSize: 16, fontWeight: 600, mt: 1 }}>{name} runs headless</Box>
+              <Box sx={{ fontSize: 13.5, color: t.chassisMuted, mt: 0.75 }}>It has no graphics card, so there is no screen to show. Use the serial console, or add a graphics card in Configure → Devices.</Box>
+              <Button variant="contained" disableElevation size="small" sx={{ textTransform: 'none', mt: 2 }} onClick={() => history.replace(hrefFor('vm', ns, name, 'serial'))}>
+                Open the serial console
+              </Button>
+            </Box>
+          </Box>
         ) : serial ? (
           // eslint-disable-next-line jsx-a11y/no-autofocus
           <SerialConsole key={`s-${ns}/${name}`} namespace={ns} name={name} autoFocus minHeight={CONSOLE_MIN} onRequestPowerOn={powerOn} onRequestResume={resume} />

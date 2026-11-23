@@ -248,6 +248,8 @@ export type DiskSourceKind =
   | 'emptyDisk'
   | 'ephemeral'
   | 'hostDisk'
+  /** A CD/DVD drive with no media. */
+  | 'empty'
   | 'other';
 
 export interface DiskRow {
@@ -300,7 +302,9 @@ export function disks(vm: VM): DiskRow[] {
   for (const d of declared) {
     seen.add(d.name);
     const device = d.cdrom ? 'cdrom' : d.lun ? 'lun' : 'disk';
-    const src = sourceOf(byName.get(d.name));
+    const vol = byName.get(d.name);
+    const src: ReturnType<typeof sourceOf> =
+      !vol && d.cdrom ? { sourceKind: 'empty', hotplug: false, config: false } : sourceOf(vol);
     rows.push({
       name: d.name,
       device,

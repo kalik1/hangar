@@ -35,6 +35,7 @@ const TABS: { view: View; label: string; also?: View[] }[] = [
   { view: 'networks', label: 'Networks' },
   { view: 'flavors', label: 'Flavors' },
   { view: 'tasks', label: 'Tasks & events' },
+  { view: 'settings', label: 'Settings' },
 ];
 
 interface Hit {

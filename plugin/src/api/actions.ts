@@ -161,6 +161,17 @@ export function deleteClaim(namespace: string, claim: string) {
   });
 }
 
+/**
+ * Lets a disk the VM created outlive it: drops the VM's ownership of the
+ * DataVolume (KubeVirt keeps a disk removed from the VM owned by it, so the
+ * disk would go when the VM is deleted).
+ */
+export function releaseClaim(namespace: string, claim: string) {
+  return runTask({ title: 'Keep disk', target: { kind: 'datastore', namespace, name: claim } }, () =>
+    kmerge(PATHS.dv(namespace, claim), { metadata: { ownerReferences: null } }).catch((e: any) => (e?.status === 404 ? undefined : Promise.reject(e)))
+  );
+}
+
 /** Deletes the VM. Disks it owns (dataVolumeTemplates) go with it unless `keepDisks`. */
 export function deleteVm(vm: VM, opts: { keepDisks?: boolean } = {}) {
   return runTask(

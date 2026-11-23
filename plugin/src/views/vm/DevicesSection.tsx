@@ -15,6 +15,7 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import MenuItem from '@mui/material/MenuItem';
 import Radio from '@mui/material/Radio';
 import RadioGroup from '@mui/material/RadioGroup';
+import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import React from 'react';
@@ -26,6 +27,7 @@ import * as E from '../../model/edit';
 import { addVmDevice, availability, hostsForVmDevices, Inventory, Mapping, mappingsOf, pciName, removeVmDevice, usbName, vmDevices, withDeviceKinds } from '../../model/hardware';
 import { Obj } from '../../model/types';
 import { key, powerState } from '../../model/vm';
+import { gpuDisplayOf, setGpuDisplay } from '../../model/vmoptions';
 import { hrefFor } from '../../shell/nav';
 import { useK8s } from '../../shell/settings';
 import { confirm, openDialog } from '../../ui/dialogs';
@@ -34,6 +36,7 @@ import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
 import { AvailLines, mappingIcon, mappingKindLabel } from '../devices/parts';
 import { Note } from '../storage/parts';
+import { NotInKubevirt, saveVm } from './configParts';
 
 const quiet = (p: Promise<unknown>) => p.catch(() => undefined);
 const invs = (a: H.AgentsReading): Inventory[] => [...a.hosts.values()].flatMap(r => (r.inv ? [r.inv] : []));
@@ -223,6 +226,7 @@ export function HostDevicesPanel({ vm, later }: { vm: Obj; later?: React.ReactNo
                       {x.as === 'gpu' ? 'gpus' : 'hostDevices'}/{x.name}: {x.deviceName}
                     </K8sName>
                   )}
+                  {x.as === 'gpu' && m?.kind === 'mdev' && <VgpuDisplay vm={vm} gpu={x.name} />}
                 </Box>
                 <IconAction icon="mdi:link-off" label="Remove from VM" onClick={() => remove(x.name, label)} />
               </Box>
@@ -235,7 +239,25 @@ export function HostDevicesPanel({ vm, later }: { vm: Obj; later?: React.ReactNo
           </Box>
         </>
       )}
+      <Box sx={{ px: 2, py: 1, borderTop: `1px solid ${t.rule}` }}>
+        <NotInKubevirt>PCI ROM-Bar, primary GPU (x-vga), a virtual IOMMU and USB hot-plug are not in KubeVirt: devices are passed through as they are, at power-on.</NotInKubevirt>
+      </Box>
     </Panel>
+  );
+}
+
+/** A vGPU (mediated device) can drive the console as the VM's display, with a boot framebuffer until the guest driver loads. */
+function VgpuDisplay({ vm, gpu }: { vm: Obj; gpu: string }) {
+  const g = (vm.spec?.template?.spec?.domain?.devices?.gpus ?? []).find((x: any) => x.name === gpu);
+  const cur = gpuDisplayOf(g);
+  const set = (p: { display: boolean; ramFB: boolean }) => quiet(saveVm(vm, p.display ? 'Use the vGPU as display' : 'Stop using the vGPU as display', setGpuDisplay(vm, gpu, p)));
+  return (
+    <Box sx={{ display: 'flex', flexWrap: 'wrap', columnGap: 2, mt: 0.5 }}>
+      <FormControlLabel sx={{ m: 0 }} control={<Switch size="small" checked={cur.display} onChange={e => set({ display: e.target.checked, ramFB: cur.ramFB })} />} label={<Box sx={{ fontSize: 13 }}>Display for the console</Box>} />
+      {cur.display && (
+        <FormControlLabel sx={{ m: 0 }} control={<Switch size="small" checked={cur.ramFB} onChange={e => set({ display: true, ramFB: e.target.checked })} />} label={<Box sx={{ fontSize: 13 }}>Boot framebuffer (ramfb)</Box>} />
+      )}
+    </Box>
   );
 }
 

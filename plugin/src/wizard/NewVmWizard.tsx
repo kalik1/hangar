@@ -27,6 +27,7 @@ import { kpost } from '../api/client';
 import { prepareClipboard } from '../api/clipboard';
 import { HangarData, useHangar } from '../api/data';
 import { useClusterDns } from '../api/dns';
+import { useProtectionPolicy } from '../api/protection';
 import { datastores } from '../model/capacity';
 import { setClipboardAnnotation, sidecarGateOn, sidecarImage } from '../model/clipboard';
 import { DNS_POLICIES, dnsProblems, DnsSettings, hostSearchHint, isDefaultDns } from '../model/dns';
@@ -96,6 +97,10 @@ interface State {
   powerOn: boolean;
   runStrategy: string;
   eviction: string;
+  protect: boolean;
+  startPaused: boolean;
+  headless: boolean;
+  sound: '' | 'ich9' | 'ac97';
 }
 
 const STEPS: { id: string; label: string }[] = [
@@ -259,6 +264,10 @@ function initialState(d: HangarData, preset: WizardPreset, libraryNs: string): S
     powerOn: true,
     runStrategy: 'Always',
     eviction: '',
+    protect: false,
+    startPaused: false,
+    headless: false,
+    sound: '',
   };
 }
 
@@ -273,6 +282,7 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
   const set = (p: Partial<State>) => setS(prev => ({ ...prev, ...p }));
   const [step, setStep] = React.useState(0);
   const [yaml, setYaml] = React.useState(false);
+  const policy = useProtectionPolicy();
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -387,6 +397,10 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
       evictionStrategy: s.eviction || undefined,
       labels: tagMap(),
       templateAnnotations: s.clipboard ? setClipboardAnnotation({}, true, sidecarImage(d.kubevirt)) : undefined,
+      protected: s.protect && policy.state === 'installed',
+      startPaused: s.startPaused,
+      headless: s.headless,
+      sound: s.sound || undefined,
     };
   };
 
@@ -847,7 +861,30 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
               <FormControlLabel control={<Checkbox checked={s.powerOn} onChange={e => set({ powerOn: e.target.checked })} />} label="Power on when the disks are ready" />
               <Box>
                 <FormControlLabel
-                  control={<Checkbox checked={s.clipboard} onChange={e => set({ clipboard: e.target.checked })} />}
+                  control={<Checkbox checked={s.protect && policy.state === 'installed'} disabled={policy.state !== 'installed'} onChange={e => set({ protect: e.target.checked })} />}
+                  label="Protect from deletion (the VM and its disks)"
+                />
+                <Typography sx={{ fontSize: 12.5, color: t.muted, ml: 4, mt: -0.5 }}>
+                  {policy.state === 'installed'
+                    ? 'Nobody can delete it until protection is turned off in Configure → Options.'
+                    : 'Needs the delete protection policy, not installed in this datacenter (Settings → Delete protection).'}
+                </Typography>
+              </Box>
+              <Box>
+                <FormControlLabel control={<Checkbox checked={s.startPaused} onChange={e => set({ startPaused: e.target.checked })} />} label="Start paused" />
+                <Typography sx={{ fontSize: 12.5, color: t.muted, ml: 4, mt: -0.5 }}>Power-on leaves it suspended, so you can open the console before the guest boots.</Typography>
+              </Box>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
+                <FormControlLabel control={<Checkbox checked={s.headless} onChange={e => set({ headless: e.target.checked, ...(e.target.checked ? { clipboard: false } : {}) })} />} label="Headless (no graphics card, serial console only)" />
+                <TextField select size="small" value={s.sound} onChange={e => set({ sound: e.target.value as State['sound'] })} sx={{ minWidth: 200 }} SelectProps={{ displayEmpty: true }} inputProps={{ 'aria-label': 'Audio' }}>
+                  <MenuItem value="">No audio</MenuItem>
+                  <MenuItem value="ich9">Audio: Intel HD Audio</MenuItem>
+                  <MenuItem value="ac97">Audio: AC97</MenuItem>
+                </TextField>
+              </Box>
+              <Box>
+                <FormControlLabel
+                  control={<Checkbox checked={s.clipboard} disabled={s.headless} onChange={e => set({ clipboard: e.target.checked })} />}
                   label="Share the clipboard with the console"
                 />
                 <Typography sx={{ fontSize: 12.5, color: t.muted, ml: 4, mt: -0.5 }}>

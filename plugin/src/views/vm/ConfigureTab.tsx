@@ -18,19 +18,22 @@ import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import React from 'react';
 import * as A from '../../api/actions';
 import { HangarData, useHangar } from '../../api/data';
+import { useGate } from '../../api/gates';
 import { datastores } from '../../model/capacity';
 import * as E from '../../model/edit';
 import { KIND_CLUSTER, KIND_NS, setCpuModel, setFlavor } from '../../model/flavors';
+import { clusterSettings, HOTPLUG_DECLARATIVE, vmStateDatastore } from '../../model/gates';
 import { hostState } from '../../model/inventory';
 import { preferredDatastore } from '../../model/placement';
+import { isProtected } from '../../model/protection';
 import { Obj } from '../../model/types';
 import { formatBytes, GiB, parseQuantity } from '../../model/units';
-import { disks, EVICTION_LABELS, hardware, isTemplate, key, nics, powerState, RUN_STRATEGIES, runStrategy, tags } from '../../model/vm';
+import { disks, EVICTION_LABELS, hardware, isTemplate, key, liveMigratable, nics, powerState, RUN_STRATEGIES, runStrategy, tags } from '../../model/vm';
+import * as O from '../../model/vmoptions';
 import { useK8s, useSettings } from '../../shell/settings';
 import { confirm, openDialog } from '../../ui/dialogs';
 import { IconAction, K8sName, Panel, Tag } from '../../ui/kit';
@@ -38,39 +41,26 @@ import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
 import { libraryImages, sizeProfiles } from '../../wizard/catalog';
 import { CpuModelSelect, FlavorSelect, useFlavorFamilies } from '../flavors/parts';
+import { GateHint } from '../settings/GateHint';
 import { datastoreItems, renderDatastore } from '../storage/DatastorePick';
 import { ClipboardPanel } from './ClipboardPanel';
+import { Help, Later, quiet, Row, saveVm } from './configParts';
+import { DevicesPanel } from './DevicesPanel';
 import { HostDevicesPanel } from './DevicesSection';
 import { DnsPanel } from './DnsPanel';
+import { CpuFlagsDialog, DiskIoDialog, DiskSettingsDialog, flagsSummary, ioSummary, ReservationDialog, reservationSummary } from './hardwareDialogs';
 import { MoveDiskDialog } from './MoveDiskDialog';
-
-const quiet = (p: Promise<unknown>) => p.catch(() => undefined);
-
-function Row({ label, children, action }: { label: string; children: React.ReactNode; action?: React.ReactNode }) {
-  const t = useTokens();
-  return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 1, borderTop: `1px solid ${t.rule}`, '&:first-of-type': { borderTop: 'none' } }}>
-      <Box sx={{ width: 170, flex: 'none', color: t.muted, fontSize: 13.5 }}>{label}</Box>
-      <Box sx={{ flex: 1, minWidth: 0, fontSize: 14, ...tabular }}>{children}</Box>
-      {action}
-    </Box>
-  );
-}
-
-function Later({ running }: { running: boolean }) {
-  const t = useTokens();
-  return running ? (
-    <Tooltip title="The VM is running: KubeVirt applies what it can at once and asks for a restart for the rest.">
-      <Box component="span" sx={{ fontSize: 12.5, color: t.muted, display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-        <Icon icon="mdi:restart" width={14} /> Some changes need a restart
-      </Box>
-    </Tooltip>
-  ) : null;
-}
+import { OptionsPanel } from './OptionsPanel';
+import { SharedFoldersPanel } from './SharedFoldersPanel';
 
 /* ------------------------------------------------------------- dialogs */
 
+function verdictText(v: 'same' | 'live' | 'restart', what: string): string {
+  return v === 'live' ? `${what}: added now, while the VM runs (hot-add)` : `${what}: at the next restart`;
+}
+
 function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: () => void }) {
+  const t = useTokens();
   const vmi = d.idx.vmi.get(key(vm));
   const hw = hardware(vm, vmi, d.instancetypes);
   const profiles = sizeProfiles(d.instancetypes);
@@ -88,19 +78,37 @@ function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: ()
   const [mem, setMem] = React.useState(String(+(hw.memoryBytes / GiB).toFixed(2)));
   const [fw, setFw] = React.useState<'bios' | 'uefi' | 'uefi-secure'>(hw.firmware === 'BIOS' ? 'bios' : hw.firmware === 'UEFI' ? 'uefi' : 'uefi-secure');
   const [tpm, setTpm] = React.useState(hw.tpm);
+  const persist = O.persistenceOf(vm);
+  const [efiKeep, setEfiKeep] = React.useState(persist.efi);
+  const [tpmKeep, setTpmKeep] = React.useState(hw.tpm ? persist.tpm : true);
+  const limits = O.hotAddLimitsOf(vm);
+  const [maxSockets, setMaxSockets] = React.useState(limits.maxSockets ? String(limits.maxSockets) : '');
+  const [maxGuest, setMaxGuest] = React.useState(limits.maxGuest ? String(+(parseQuantity(limits.maxGuest) / GiB).toFixed(2)) : '');
+  const cs = clusterSettings(d.kubevirt);
+  const stateDs = vmStateDatastore(d.kubevirt, d.storageClasses);
   const memBytes = Number(mem) * GiB;
-  const ok = mode === 'profile' ? !!profile : sockets >= 1 && cores >= 1 && threads >= 1 && memBytes >= 128 * 2 ** 20;
+  const maxGuestBytes = maxGuest.trim() ? Number(maxGuest) * GiB : null;
+  const limitsBad =
+    (maxSockets.trim() !== '' && !(Number(maxSockets) >= sockets)) || (maxGuestBytes !== null && !(maxGuestBytes >= memBytes && maxGuestBytes % (2 * 2 ** 20) === 0));
+  const ok = mode === 'profile' ? !!profile : sockets >= 1 && cores >= 1 && threads >= 1 && memBytes >= 128 * 2 ** 20 && !limitsBad;
+  const live =
+    vmi && mode === 'custom' && !hw.instancetype
+      ? O.liveCompute(vmi, { sockets, cores, threads, memoryBytes: memBytes }, { liveUpdate: cs.rollout === 'LiveUpdate', liveMigrateUpdates: cs.liveMigrateUpdates, migratable: liveMigratable(vm, vmi) })
+      : null;
   const save = () => {
     let next = mode === 'profile' ? setFlavor(vm, { kind: profileKind, name: profile }) : E.setCompute(vm, { sockets, cores, threads, memoryBytes: memBytes });
     next = E.setFirmware(next, fw, tpm);
+    next = O.setPersistence(next, { efi: fw !== 'bios' && efiKeep, tpm: tpmKeep });
+    if (mode === 'custom') next = O.setHotAddLimits(next, { maxSockets: maxSockets.trim() ? Number(maxSockets) : null, maxGuestBytes });
     // A flavor that sets the CPU model forbids the VM's own (KubeVirt rejects the conflict).
     next = setCpuModel(next, flavorModel ? '' : cpuModel);
-    quiet(A.updateVm(vm, 'Change CPU and memory', next));
+    quiet(saveVm(vm, 'Change CPU and memory', next));
     onClose();
   };
   const num = (label: string, v: number, set: (n: number) => void) => (
     <TextField type="number" size="small" label={label} value={v} onChange={e => set(Math.max(1, Math.round(Number(e.target.value) || 1)))} sx={{ width: 100 }} inputProps={{ min: 1 }} />
   );
+  const step = cores * threads;
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth aria-labelledby="hangar-compute-title">
       <DialogTitle id="hangar-compute-title" sx={{ fontSize: 18 }}>
@@ -124,6 +132,47 @@ function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: ()
               <Box sx={{ fontSize: 14 }}>= {sockets * cores * threads} vCPU</Box>
             </Box>
             <TextField type="number" size="small" label="Memory (GiB)" value={mem} onChange={e => setMem(e.target.value)} sx={{ width: 160 }} inputProps={{ min: 0.125, step: 0.5 }} />
+            <Box sx={{ border: `1px solid ${t.rule}`, borderRadius: 1, p: 1.5, display: 'grid', gap: 1.25 }}>
+              <Typography sx={{ fontSize: 13.5, fontWeight: 600 }}>Hot-add: how far it can grow while running</Typography>
+              <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+                <TextField
+                  type="number"
+                  size="small"
+                  label="Up to sockets"
+                  value={maxSockets}
+                  onChange={e => setMaxSockets(e.target.value)}
+                  placeholder={String(cs.maxCpuSockets ?? sockets * cs.maxHotplugRatio)}
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ width: 140 }}
+                  inputProps={{ min: sockets }}
+                />
+                <TextField
+                  type="number"
+                  size="small"
+                  label="Up to memory (GiB)"
+                  value={maxGuest}
+                  onChange={e => setMaxGuest(e.target.value)}
+                  placeholder={String(+((memBytes * cs.maxHotplugRatio) / GiB).toFixed(1))}
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ width: 170 }}
+                  inputProps={{ min: Number(mem), step: 0.5 }}
+                />
+              </Box>
+              <Help>
+                Empty: KubeVirt&apos;s default, {cs.maxHotplugRatio}× the size at power-on. CPUs are added a socket at a time ({step} vCPU each with {cores} core{cores > 1 ? 's' : ''} × {threads} thread{threads > 1 ? 's' : ''}); memory needs at least 1 GiB.
+                {!cs.liveMigrateUpdates && ' KubeVirt may not move running VMs here (no LiveMigrate update method): hot-add waits for a restart.'} New limits apply from the next power-on.
+              </Help>
+              {limitsBad && <Help tone="warn">The limits cannot be below the current size; memory goes in 2 MiB steps.</Help>}
+            </Box>
+            {live && (live.cpu !== 'same' || live.memory !== 'same') && (
+              <Box sx={{ display: 'grid', gap: 0.25 }}>
+                {live.cpu !== 'same' && <Typography sx={{ fontSize: 13, color: live.cpu === 'live' ? '#2F855A' : '#B7791F' }}>{verdictText(live.cpu, 'CPUs')}</Typography>}
+                {live.memory !== 'same' && <Typography sx={{ fontSize: 13, color: live.memory === 'live' ? '#2F855A' : '#B7791F' }}>{verdictText(live.memory, 'Memory')}</Typography>}
+                {live.why.map(w => (
+                  <Help key={w}>{w}</Help>
+                ))}
+              </Box>
+            )}
           </>
         ) : (
           <FlavorSelect
@@ -159,7 +208,18 @@ function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: ()
               UEFI, Secure Boot
             </ToggleButton>
           </ToggleButtonGroup>
-          <FormControlLabel sx={{ display: 'flex', mt: 1 }} control={<Checkbox checked={tpm} onChange={e => setTpm(e.target.checked)} />} label="Virtual TPM" />
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', columnGap: 2, mt: 1 }}>
+            {fw !== 'bios' && <FormControlLabel control={<Checkbox checked={efiKeep} onChange={e => setEfiKeep(e.target.checked)} />} label="Keep UEFI variables (boot entries)" />}
+            <FormControlLabel control={<Checkbox checked={tpm} onChange={e => setTpm(e.target.checked)} />} label="Virtual TPM" />
+            {tpm && <FormControlLabel control={<Checkbox checked={tpmKeep} onChange={e => setTpmKeep(e.target.checked)} />} label="Keep the TPM state" />}
+          </Box>
+          {((fw !== 'bios' && efiKeep) || (tpm && tpmKeep)) && (
+            <Help>
+              KubeVirt keeps them on a small disk {stateDs.name ? `on ${stateDs.name}` : ''}
+              {stateDs.how === 'set' ? ' (the datacenter’s VM state datastore)' : stateDs.how === 'none' ? ': no default datastore, the VM cannot start' : ' (the default datastore: VM state datastore not set in Settings)'}
+              . Without it, BitLocker and boot entries are lost at every power-off.
+            </Help>
+          )}
           {fw !== (hw.firmware === 'BIOS' ? 'bios' : hw.firmware === 'UEFI' ? 'uefi' : 'uefi-secure') && (
             <Typography sx={{ fontSize: 13, color: '#B7791F' }}>Changing the firmware of an installed guest usually stops it from booting.</Typography>
           )}
@@ -177,7 +237,7 @@ function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: ()
   );
 }
 
-function AddDiskDialog({ vm, d, onClose, libraryNs }: { vm: Obj; d: HangarData; onClose: () => void; libraryNs: string }) {
+function AddDiskDialog({ vm, d, onClose, libraryNs, preset }: { vm: Obj; d: HangarData; onClose: () => void; libraryNs: string; preset?: { kind: 'iso'; drive: string } }) {
   const ns = vm.metadata.namespace as string;
   const ds = datastores(d.storageClasses, d.pvcs, d.nodes, d.storageProfiles, d.snapshotClasses);
   const used = new Set(d.vms.flatMap(v => disks(v).map(x => `${v.metadata.namespace}/${x.claimName}`)));
@@ -190,31 +250,46 @@ function AddDiskDialog({ vm, d, onClose, libraryNs }: { vm: Obj; d: HangarData; 
       p.metadata.labels?.['hangar.magesgate.com/image'] !== 'true'
   );
   const isos = libraryImages(d.dvs, d.pvcs, libraryNs).filter(i => i.media === 'iso' && i.ready);
-  const [kind, setKind] = React.useState<'new' | 'existing' | 'iso'>('new');
+  const vmi = d.idx.vmi.get(key(vm));
+  const running = !!vmi;
+  const hot = useGate(HOTPLUG_DECLARATIVE);
+  const live = running && hot.on !== false;
+  const emptyDrives = disks(vm).filter(x => x.device === 'cdrom' && x.sourceKind === 'empty');
+  const [kind, setKind] = React.useState<'new' | 'existing' | 'iso' | 'drive'>(preset?.kind ?? 'new');
   const [size, setSize] = React.useState('10');
   const [sc, setSc] = React.useState(preferredDatastore(ds, d.nodes.length)?.name ?? '');
   const tk = useTokens();
   const [bus, setBus] = React.useState('virtio');
   const [claim, setClaim] = React.useState(free[0]?.metadata.name ?? '');
   const [iso, setIso] = React.useState(isos[0] ? `${isos[0].namespace}/${isos[0].name}` : '');
+  const [drive, setDrive] = React.useState(preset?.drive ?? emptyDrives[0]?.name ?? '');
   const [boot, setBoot] = React.useState(false);
-  const ok = kind === 'new' ? Number(size) >= 1 : kind === 'existing' ? !!claim : !!iso;
+  const busLive = !live || E.HOTPLUG_BUSES.includes(bus);
+  const ok = kind === 'new' ? Number(size) >= 1 && busLive : kind === 'existing' ? !!claim && busLive : kind === 'iso' ? !!iso : hot.on !== false;
+  const isoLive = live && !!drive;
   const save = () => {
-    if (kind === 'new') quiet(A.updateVm(vm, 'Add disk', E.addBlankDisk(vm, { sizeBytes: Number(size) * GiB, storageClass: sc, bus }).vm));
-    else if (kind === 'existing') quiet(A.updateVm(vm, 'Attach disk', E.attachDisk(vm, claim, bus).vm));
+    if (kind === 'new') quiet(saveVm(vm, live ? 'Add disk (hot-plug)' : 'Add disk', E.addBlankDisk(vm, { sizeBytes: Number(size) * GiB, storageClass: sc, bus, hotplug: live }).vm));
+    else if (kind === 'existing') quiet(saveVm(vm, live ? 'Attach disk (hot-plug)' : 'Attach disk', E.attachDisk(vm, claim, bus, live).vm));
+    else if (kind === 'drive') quiet(saveVm(vm, 'Add CD/DVD drive', E.addCdromDrive(vm).vm));
     else {
       const i = isos.find(x => `${x.namespace}/${x.name}` === iso)!;
-      quiet(A.updateVm(vm, 'Insert ISO', E.insertIso(vm, i, boot)));
+      quiet(saveVm(vm, isoLive ? 'Insert ISO (hot-plug)' : 'Insert ISO', E.insertIso(vm, i, boot, { drive: drive || undefined, hotplug: isoLive })));
     }
     onClose();
   };
+  const when = (liveNow: boolean) =>
+    !running ? null : liveNow ? (
+      <Typography sx={{ fontSize: 13, color: '#2F855A' }}>The running VM gets it at once (hot-plug).</Typography>
+    ) : (
+      <Typography sx={{ fontSize: 13, color: '#B7791F' }}>The running VM gets it at the next restart.</Typography>
+    );
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth aria-labelledby="hangar-adddisk-title">
       <DialogTitle id="hangar-adddisk-title" sx={{ fontSize: 18 }}>
         Add a disk to {vm.metadata.name}
       </DialogTitle>
       <DialogContent sx={{ display: 'grid', gap: 2 }}>
-        <ToggleButtonGroup size="small" exclusive value={kind} onChange={(_, v) => v && setKind(v)} aria-label="Kind of disk">
+        <ToggleButtonGroup size="small" exclusive value={kind} onChange={(_, v) => v && setKind(v)} aria-label="Kind of disk" sx={{ flexWrap: 'wrap' }}>
           <ToggleButton value="new" sx={{ textTransform: 'none' }}>
             New disk
           </ToggleButton>
@@ -223,6 +298,9 @@ function AddDiskDialog({ vm, d, onClose, libraryNs }: { vm: Obj; d: HangarData; 
           </ToggleButton>
           <ToggleButton value="iso" sx={{ textTransform: 'none' }} disabled={!isos.length}>
             CD/DVD from an ISO
+          </ToggleButton>
+          <ToggleButton value="drive" sx={{ textTransform: 'none' }}>
+            Empty CD/DVD drive
           </ToggleButton>
         </ToggleButtonGroup>
         {kind === 'new' && (
@@ -259,32 +337,55 @@ function AddDiskDialog({ vm, d, onClose, libraryNs }: { vm: Obj; d: HangarData; 
                 </MenuItem>
               ))}
             </TextField>
+            <TextField select size="small" label="Drive" value={drive} onChange={e => setDrive(e.target.value)} SelectProps={{ displayEmpty: true }} InputLabelProps={{ shrink: true }}>
+              {emptyDrives.map(x => (
+                <MenuItem key={x.name} value={x.name}>
+                  Empty drive {x.name}
+                </MenuItem>
+              ))}
+              <MenuItem value="">A new drive</MenuItem>
+            </TextField>
             <FormControlLabel control={<Checkbox checked={boot} onChange={e => setBoot(e.target.checked)} />} label="Boot from it first" />
+            {when(isoLive)}
+            {running && !drive && hot.on !== false && <Help>Media go into a running VM only through an empty drive that was there at power-on: add one now and use it after the next restart.</Help>}
           </>
         )}
-        {kind !== 'iso' && (
-          <TextField select size="small" label="Bus" value={bus} onChange={e => setBus(e.target.value)} sx={{ width: 160 }}>
-            <MenuItem value="virtio">VirtIO</MenuItem>
-            <MenuItem value="scsi">SCSI</MenuItem>
-            <MenuItem value="sata">SATA</MenuItem>
-          </TextField>
+        {kind === 'drive' && (
+          <>
+            <Typography sx={{ fontSize: 14 }}>A SATA CD/DVD drive with no media: ISOs can then be inserted and ejected while the VM runs, like a physical drive.</Typography>
+            {hot.on === false ? <GateHint gate={HOTPLUG_DECLARATIVE}>An empty drive needs KubeVirt&apos;s {HOTPLUG_DECLARATIVE} feature, off in this datacenter.</GateHint> : when(false)}
+          </>
         )}
+        {(kind === 'new' || kind === 'existing') && (
+          <>
+            <TextField select size="small" label="Bus" value={bus} onChange={e => setBus(e.target.value)} sx={{ width: 160 }}>
+              <MenuItem value="virtio">VirtIO</MenuItem>
+              <MenuItem value="scsi">SCSI</MenuItem>
+              <MenuItem value="sata" disabled={live}>
+                SATA{live ? ' (not while running)' : ''}
+              </MenuItem>
+            </TextField>
+            {when(live)}
+          </>
+        )}
+        {running && hot.on === false && kind !== 'drive' && <GateHint gate={HOTPLUG_DECLARATIVE}>Adding disks to a running VM needs KubeVirt&apos;s {HOTPLUG_DECLARATIVE} feature, off in this datacenter.</GateHint>}
       </DialogContent>
       <DialogActions>
         <Button color="inherit" onClick={onClose}>
           Cancel
         </Button>
         <Button variant="contained" disableElevation disabled={!ok} onClick={save}>
-          {kind === 'iso' ? 'Insert ISO' : kind === 'existing' ? 'Attach disk' : 'Add disk'}
+          {kind === 'iso' ? 'Insert ISO' : kind === 'existing' ? 'Attach disk' : kind === 'drive' ? 'Add drive' : 'Add disk'}
         </Button>
       </DialogActions>
     </Dialog>
   );
 }
 
-function ExpandDialog({ vm, claim, current, onClose }: { vm: Obj; claim: string; current: number; onClose: () => void }) {
+function ExpandDialog({ vm, claim, current, running, onClose }: { vm: Obj; claim: string; current: number; running: boolean; onClose: () => void }) {
   const [size, setSize] = React.useState(String(Math.ceil(current / GiB) + 10));
   const bytes = Number(size) * GiB;
+  const expand = useGate('ExpandDisks');
   return (
     <Dialog open onClose={onClose} maxWidth="xs" fullWidth aria-labelledby="hangar-expand-title">
       <DialogTitle id="hangar-expand-title" sx={{ fontSize: 18 }}>
@@ -294,6 +395,12 @@ function ExpandDialog({ vm, claim, current, onClose }: { vm: Obj; claim: string;
         <Typography sx={{ fontSize: 14 }}>
           Now {formatBytes(current)}. Disks only grow: grow the partition and filesystem in the guest afterwards.
         </Typography>
+        {running &&
+          (expand.on === false ? (
+            <GateHint gate="ExpandDisks">The running guest sees the new size after a restart: seeing it at once needs KubeVirt&apos;s ExpandDisks feature, off in this datacenter.</GateHint>
+          ) : (
+            <Typography sx={{ fontSize: 13, color: '#2F855A' }}>The running guest sees the new size at once (when the datastore can grow disks in use).</Typography>
+          ))}
         <TextField type="number" size="small" label="New size (GiB)" value={size} onChange={e => setSize(e.target.value)} inputProps={{ min: Math.ceil(current / GiB) + 1 }} />
       </DialogContent>
       <DialogActions>
@@ -335,6 +442,18 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
   const pvc = (c?: string) => (c ? d.idx.pvc.get(`${vmNs}/${c}`) : undefined);
   const size = (c?: string) => parseQuantity(pvc(c)?.status?.capacity?.storage ?? pvc(c)?.spec?.resources?.requests?.storage);
   const sc = (c?: string) => d.storageClasses.find(s => s.metadata.name === pvc(c)?.spec?.storageClassName);
+  const hotGate = useGate(HOTPLUG_DECLARATIVE);
+  const persist = O.persistenceOf(vm);
+  const lim = O.hotAddLimitsOf(vm);
+  const cs = clusterSettings(d.kubevirt);
+  const vmiCpu = vmi?.spec?.domain?.cpu;
+  const vmiMax = vmi?.spec?.domain?.memory?.maxGuest;
+  const hotAddText = hw.instancetype
+    ? 'From the flavor'
+    : `Up to ${vmiCpu?.maxSockets ?? lim.maxSockets ?? `${cs.maxHotplugRatio}×`} sockets and ${vmiMax ?? lim.maxGuest ?? `${cs.maxHotplugRatio}×`} of memory while running${
+        cs.liveMigrateUpdates && cs.rollout === 'LiveUpdate' ? '' : ' (off in this datacenter: Settings)'
+      }`;
+  const mq = O.deviceOptions(vm).nicMultiQueue;
 
   /* boot order */
   const bootables = [...ds.filter(x => !x.config).map(x => ({ name: x.name, kind: x.device === 'cdrom' ? 'CD/DVD' : 'Disk' })), ...ns.map(n => ({ name: n.name, kind: 'Network (PXE)' }))];
@@ -370,19 +489,56 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
   const userTags = tags(vm);
   const [tagText, setTagText] = React.useState(userTags.map(([k, v]) => `${k}=${v}`).join(', '));
 
+  const prot = isProtected(vm);
+  const hotOn = hotGate.on !== false;
   const removeDisk = async (name: string, claim?: string) => {
-    const r = E.removeDisk(vm, name);
+    const hp = E.isHotpluggable(vm, name);
+    const r = hp || !running ? { ...E.removeDisk(E.forHotplug(vm), name) } : E.removeDisk(vm, name);
     const ok = await confirm({
       title: `Remove ${name} from ${vm.metadata.name}?`,
-      body: <p>{claim ? 'The disk is detached from the VM.' : 'The device is removed.'}</p>,
+      body: (
+        <>
+          <p>{claim ? 'The disk is detached from the VM.' : 'The device is removed.'}</p>
+          {running && <p>{hp && hotOn ? 'The running VM loses it at once (hot-unplug).' : 'The running VM keeps it until the next restart.'}</p>}
+          {claim && prot && <p>The VM is protected from deletion: the disk stays in the folder, still protected. Remove its protection in Storage → Disks to delete it.</p>}
+        </>
+      ),
       confirm: 'Remove',
       danger: true,
-      option: claim ? { label: 'Also delete the disk and its data', help: 'Otherwise it stays in the folder, unattached.', initial: false } : undefined,
+      option: claim && !prot ? { label: 'Also delete the disk and its data', help: 'Otherwise it stays in the folder, unattached.', initial: false } : undefined,
     });
     if (!ok) return;
-    await A.updateVm(vm, 'Remove disk', r.vm).catch(() => undefined);
-    // A disk the VM created is deleted by KubeVirt with its template; delete others only if asked.
-    if (claim && ok.option && !r.owned) quiet(A.deleteClaim(vmNs, claim));
+    try {
+      await saveVm(vm, hp && running ? 'Remove disk (hot-unplug)' : 'Remove disk', r.vm);
+    } catch {
+      return;
+    }
+    if (!claim || prot) return;
+    // KubeVirt keeps a disk it created after its template goes (owned by the VM, deleted with it): delete it now, or let it go for good.
+    if (ok.option) quiet(A.deleteClaim(vmNs, claim));
+    else if (r.owned) quiet(A.releaseClaim(vmNs, claim));
+  };
+  const eject = async (name: string) => {
+    const hp = E.isHotpluggable(vm, name);
+    const ok = await confirm({
+      title: `Eject the CD/DVD of ${vm.metadata.name}?`,
+      body: (
+        <>
+          <p>{hotOn ? 'The drive stays, empty: insert another ISO later.' : 'The drive is removed with its media.'}</p>
+          {running && <p>{hp && hotOn ? 'The running VM loses the media at once.' : 'The running VM keeps the media until the next restart.'}</p>}
+        </>
+      ),
+      confirm: 'Eject',
+    });
+    if (!ok) return;
+    const r = E.ejectCdrom(vm, name, hotOn);
+    try {
+      await saveVm(vm, hp && running ? 'Eject CD/DVD (hot-unplug)' : 'Eject CD/DVD', r.vm);
+    } catch {
+      return;
+    }
+    // The media was this VM's copy of a library ISO.
+    if (r.claim && r.owned) quiet(A.deleteClaim(vmNs, r.claim));
   };
 
   return (
@@ -405,6 +561,13 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
             {hw.dedicatedCpus && <Tag>dedicated</Tag>}
           </Row>
           <Row label="Memory">{formatBytes(hw.memoryBytes)}</Row>
+          <Row label="Hot-add">{hotAddText}</Row>
+          <Row label="CPU flags" action={<IconAction icon="mdi:pencil-outline" label="Change CPU flags" onClick={() => openDialog(close => <CpuFlagsDialog vm={vm} d={d} onClose={close} />)} />}>
+            {flagsSummary(vm)}
+          </Row>
+          <Row label="Reservation and limits" action={<IconAction icon="mdi:pencil-outline" label="Change reservation and limits" onClick={() => openDialog(close => <ReservationDialog vm={vm} d={d} onClose={close} />)} />}>
+            {reservationSummary(vm)}
+          </Row>
           <Row label="Sizing">
             {hw.instancetype ? (
               <>
@@ -416,7 +579,8 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
           </Row>
           <Row label="Firmware">
             {hw.firmware}
-            {hw.tpm ? ', TPM' : ''}
+            {hw.firmware !== 'BIOS' && persist.efi ? ', UEFI variables kept' : ''}
+            {hw.tpm ? (persist.tpm ? ', TPM (state kept)' : ', TPM (cleared at power-off)') : ''}
           </Row>
           {hw.preference && (
             <Row label="Guest OS tuning">
@@ -452,10 +616,11 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
               {ds.map(x => (
                 <tr key={x.name}>
                   <td>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
                       <Icon icon={x.config ? 'mdi:file-cog-outline' : x.device === 'cdrom' ? 'mdi:disc' : 'mdi:harddisk'} width={16} style={{ color: t.muted }} />
                       <span>{x.config ? (x.sourceKind === 'cloudInit' ? 'Guest customization (cloud-init)' : `${x.name} (${x.sourceKind})`) : x.name}</span>
-                      {x.device === 'cdrom' && <Tag>CD/DVD</Tag>}
+                      {x.device === 'cdrom' && <Tag>{x.sourceKind === 'empty' ? 'CD/DVD, empty' : 'CD/DVD'}</Tag>}
+                      {x.hotplug && <Tag tone="accent">hot-plugged</Tag>}
                     </Box>
                     {k8s && x.claimName && <K8sName>pvc/{x.claimName}</K8sName>}
                   </td>
@@ -463,12 +628,15 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
                   <td>{x.claimName ? formatBytes(size(x.claimName)) : '—'}</td>
                   <td>{pvc(x.claimName)?.spec?.storageClassName ?? (x.sourceKind === 'containerDisk' ? 'Image (ephemeral)' : '—')}</td>
                   <Box component="td" sx={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {x.device === 'disk' && !x.config && (
+                      <IconAction icon="mdi:tune-variant" label={`Settings of ${x.name}`} onClick={() => openDialog(close => <DiskSettingsDialog vm={vm} name={x.name} bus={x.bus} running={running} onClose={close} />)} />
+                    )}
                     {x.claimName && x.device === 'disk' && (
                       <IconAction
                         icon="mdi:arrow-expand-horizontal"
                         label={sc(x.claimName)?.allowVolumeExpansion ? 'Expand' : 'This datastore cannot expand disks'}
                         disabled={!sc(x.claimName)?.allowVolumeExpansion}
-                        onClick={() => openDialog(close => <ExpandDialog vm={vm} claim={x.claimName!} current={size(x.claimName)} onClose={close} />)}
+                        onClick={() => openDialog(close => <ExpandDialog vm={vm} claim={x.claimName!} current={size(x.claimName)} running={running} onClose={close} />)}
                       />
                     )}
                     {x.claimName && x.device === 'disk' && (
@@ -478,12 +646,36 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
                         onClick={() => openDialog(close => <MoveDiskDialog vm={vm} only={x.name} onClose={close} />)}
                       />
                     )}
-                    {!x.config && <IconAction icon={x.device === 'cdrom' ? 'mdi:eject-outline' : 'mdi:link-off'} label={x.device === 'cdrom' ? 'Eject and remove' : 'Remove from VM'} onClick={() => removeDisk(x.name, x.claimName)} />}
+                    {x.device === 'cdrom' && x.sourceKind === 'empty' && (
+                      <IconAction
+                        icon="mdi:disc-player"
+                        label={`Insert an ISO into ${x.name}`}
+                        onClick={() => openDialog(close => <AddDiskDialog vm={vm} d={d} onClose={close} libraryNs={settings.libraryNamespace} preset={{ kind: 'iso', drive: x.name }} />)}
+                      />
+                    )}
+                    {x.device === 'cdrom' && x.sourceKind !== 'empty' && <IconAction icon="mdi:eject-outline" label={hotOn ? 'Eject' : 'Eject and remove the drive'} onClick={() => eject(x.name)} />}
+                    {!x.config && (x.device !== 'cdrom' || x.sourceKind === 'empty') && (
+                      <IconAction icon="mdi:link-off" label={x.device === 'cdrom' ? 'Remove the drive' : 'Remove from VM'} onClick={() => removeDisk(x.name, x.claimName)} />
+                    )}
                   </Box>
                 </tr>
               ))}
             </tbody>
           </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 0.75, borderTop: `1px solid ${t.rule}`, fontSize: 13 }}>
+            <Box sx={{ color: t.muted, width: 80, flex: 'none' }}>Disk I/O</Box>
+            <Box sx={{ flex: 1, minWidth: 0 }}>{ioSummary(vm)}</Box>
+            <IconAction icon="mdi:pencil-outline" label="Change disk I/O" onClick={() => openDialog(close => <DiskIoDialog vm={vm} running={running} onClose={close} />)} />
+          </Box>
+          {running && (
+            <Box sx={{ px: 2, pb: 1 }}>
+              {hotOn ? (
+                <Help>Disks added now (VirtIO or SCSI) and ISOs inserted into an empty drive reach the running VM at once.</Help>
+              ) : (
+                <GateHint gate={HOTPLUG_DECLARATIVE}>Disks and ISOs reach a running VM at its next restart: hot-plug needs KubeVirt&apos;s {HOTPLUG_DECLARATIVE} feature.</GateHint>
+              )}
+            </Box>
+          )}
         </Panel>
 
         <Panel
@@ -535,8 +727,9 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
                 <MenuItem value="rtl8139">Realtek 8139</MenuItem>
               </TextField>
               <Box sx={{ fontSize: 13, color: t.muted, ...tabular, minWidth: 130 }}>{n.mac ?? 'MAC assigned at start'}</Box>
-              {!n.isPodNetwork && (
+              {n.binding !== 'SR-IOV' && (
                 <FormControlLabel
+                  title="Like plugging or pulling the cable: applies at once, also while the VM runs"
                   sx={{ m: 0 }}
                   control={<Switch size="small" checked={n.linkState !== 'down'} onChange={e => quiet(A.updateVm(vm, e.target.checked ? 'Connect adapter' : 'Disconnect adapter', E.setNic(vm, n.name, { linkDown: !e.target.checked })))} />}
                   label={<Box sx={{ fontSize: 13 }}>Connected</Box>}
@@ -553,7 +746,15 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
               />
             </Box>
           ))}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 0.5, borderTop: `1px solid ${t.rule}`, fontSize: 13 }}>
+            <Box sx={{ color: t.muted, flex: 1 }}>Multi-queue: one queue per vCPU on VirtIO adapters (faster networking on VMs with several vCPU)</Box>
+            <Switch size="small" checked={mq} onChange={e => quiet(saveVm(vm, e.target.checked ? 'Turn on network multi-queue' : 'Turn off network multi-queue', O.setDevices(vm, { nicMultiQueue: e.target.checked })))} inputProps={{ 'aria-label': 'Network multi-queue' }} />
+          </Box>
         </Panel>
+
+        <DevicesPanel vm={vm} />
+
+        <SharedFoldersPanel vm={vm} />
 
         <DnsPanel vm={vm} />
 
@@ -563,6 +764,8 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
       </Box>
 
       <Box sx={{ display: 'grid', gap: 2 }}>
+        <OptionsPanel vm={vm} />
+
         <Panel
           title="Boot order"
           icon="mdi:sort-numeric-ascending"
