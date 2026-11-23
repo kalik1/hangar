@@ -77,6 +77,8 @@ export function CpuFlagsDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onC
         <Autocomplete
           size="small"
           freeSolo
+          value={null}
+          blurOnSelect
           options={options}
           inputValue={input}
           onInputChange={(_, v) => setInput(v)}

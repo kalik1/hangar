@@ -25,7 +25,7 @@ import { HangarData, useHangar } from '../../api/data';
 import { useGate } from '../../api/gates';
 import { datastores } from '../../model/capacity';
 import * as E from '../../model/edit';
-import { KIND_CLUSTER, KIND_NS, setCpuModel, setFlavor } from '../../model/flavors';
+import { hostCpus, KIND_CLUSTER, KIND_NS, setCpuModel, setFlavor, vendors } from '../../model/flavors';
 import { clusterSettings, HOTPLUG_DECLARATIVE, vmStateDatastore } from '../../model/gates';
 import { hostState } from '../../model/inventory';
 import { preferredDatastore } from '../../model/placement';
@@ -56,7 +56,32 @@ import { SharedFoldersPanel } from './SharedFoldersPanel';
 /* ------------------------------------------------------------- dialogs */
 
 function verdictText(v: 'same' | 'live' | 'restart', what: string): string {
-  return v === 'live' ? `${what}: added now, while the VM runs (hot-add)` : `${what}: at the next restart`;
+  return v === 'live' ? `${what}: changes now, while the VM runs (hot-plug)` : `${what}: at the next restart`;
+}
+
+/** A whole-number field you can clear and retype; reports only valid values (≥ 1). */
+function IntField({ label, value, onValue }: { label: string; value: number; onValue: (n: number) => void }) {
+  const [text, setText] = React.useState(String(value));
+  React.useEffect(() => {
+    if (Number(text) !== value) setText(String(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return (
+    <TextField
+      type="number"
+      size="small"
+      label={label}
+      value={text}
+      onChange={e => {
+        setText(e.target.value);
+        const n = Math.round(Number(e.target.value));
+        if (e.target.value !== '' && n >= 1) onValue(n);
+      }}
+      onBlur={() => setText(String(value))}
+      sx={{ width: 100 }}
+      inputProps={{ min: 1 }}
+    />
+  );
 }
 
 function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: () => void }) {
@@ -86,6 +111,8 @@ function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: ()
   const [maxGuest, setMaxGuest] = React.useState(limits.maxGuest ? String(+(parseQuantity(limits.maxGuest) / GiB).toFixed(2)) : '');
   const cs = clusterSettings(d.kubevirt);
   const stateDs = vmStateDatastore(d.kubevirt, d.storageClasses);
+  const effModel = cpuModel || vmi?.spec?.domain?.cpu?.model || d.kubevirt?.spec?.configuration?.cpuModel || 'host-model';
+  const mixedMakers = vendors(hostCpus(d.nodes)).length > 1 && effModel !== 'host-model' && effModel !== 'host-passthrough';
   const memBytes = Number(mem) * GiB;
   const maxGuestBytes = maxGuest.trim() ? Number(maxGuest) * GiB : null;
   const limitsBad =
@@ -105,9 +132,7 @@ function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: ()
     quiet(saveVm(vm, 'Change CPU and memory', next));
     onClose();
   };
-  const num = (label: string, v: number, set: (n: number) => void) => (
-    <TextField type="number" size="small" label={label} value={v} onChange={e => set(Math.max(1, Math.round(Number(e.target.value) || 1)))} sx={{ width: 100 }} inputProps={{ min: 1 }} />
-  );
+  const num = (label: string, v: number, set: (n: number) => void) => <IntField label={label} value={v} onValue={set} />;
   const step = cores * threads;
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth aria-labelledby="hangar-compute-title">
@@ -171,6 +196,11 @@ function ComputeDialog({ vm, d, onClose }: { vm: Obj; d: HangarData; onClose: ()
                 {live.why.map(w => (
                   <Help key={w}>{w}</Help>
                 ))}
+                {(live.cpu === 'live' || live.memory === 'live') && mixedMakers && (
+                  <Help tone="warn">
+                    KubeVirt grows a running VM by moving it live to another host. This datacenter mixes Intel and AMD hosts: with a CPU model both makers offer, the move may cross makers, which QEMU does not support (the guest can freeze). Pin the VM to one maker&apos;s hosts first, or restart instead.
+                  </Help>
+                )}
               </Box>
             )}
           </>

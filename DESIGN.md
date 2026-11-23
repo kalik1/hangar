@@ -38,6 +38,11 @@ the YAML editor, and lets the New VM wizard open the YAML before creating.
 | Power policy | `spec.runStrategy` |
 | On host maintenance | `evictionStrategy` |
 | Guest customization | cloud-init NoCloud user data |
+| Options (Proxmox) | `startStrategy`, `domain.clock`, `devices.inputs`, `features.acpi`, `firmware.uuid/serial` + `domain.chassis`, `spec.preference` |
+| Protection | the label `hangar.magesgate.com/protected=true` on the VM and its disks, enforced by a ValidatingAdmissionPolicy (`distribution/protection-policy.yaml`) |
+| Hot-plug, hot-add | hot-pluggable volumes (`DeclarativeHotplugVolumes`), more sockets/memory up to `maxSockets`/`maxGuest` (live update through a live migration) |
+| Shared folder | `devices.filesystems[].virtiofs` + a PVC, ConfigMap or Secret volume |
+| Datacenter features | the KubeVirt resource's `developerConfiguration.featureGates` |
 
 ## 2. Screens
 
@@ -48,7 +53,7 @@ history keeps growing, the tasks keep being followed.
 - **Top bar**: product mark, datacenter (cluster) with host and VM counts,
   search across VMs (name, IP, host, tags, notes) and hosts, the Kubernetes
   switch, New VM. Below it the views: Dashboard, Virtual machines, Hosts,
-  Storage, Networks, Tasks & events.
+  Storage, Networks, Flavors, Tasks & events, Settings.
 - **Inventory tree** (left, resizable, can be hidden): datacenter → folders
   → VMs and templates; in the host views, datacenter → hosts → the VMs
   running on each. LEDs show power state. Arrow keys move, Right/Left
@@ -91,9 +96,29 @@ history keeps growing, the tasks keep being followed.
     Ctrl+C/X in the console on plain http (a user gesture); otherwise the
     panel's "Copy to this computer" does it. VMs without it keep "Type
     text".
-  - Configure: CPU/memory/size profile, firmware and TPM; disks and CD/DVD
-    (add new, attach existing, insert an ISO, expand, eject, remove, delete);
-    network adapters (network, model, MAC, link up/down, add, remove); DNS of
+  - Configure: CPU/memory/size profile, firmware and TPM (with persistent
+    UEFI variables and TPM state), CPU flags (require/disable, with the hosts
+    that offer each flag from KubeVirt's node labels), reservation and
+    limits, hot-add ceilings and, for a running VM, what applies at once
+    (more sockets up to maxSockets and memory between the boot size and
+    maxGuest go in through a live migration; the rest at restart, with the
+    reason); disks and CD/DVD (add new, attach existing, insert an ISO,
+    expand, eject, remove, delete; while running with DeclarativeHotplugVolumes:
+    VirtIO/SCSI disks in and out, ISOs into an empty drive that existed at
+    power-on; per-disk cache, I/O mode, own I/O thread, serial, read-only,
+    shareable, error policy, block size; I/O threads and multi-queue for the
+    VM); network adapters (network, model, MAC, link up/down on every
+    binding but SR-IOV, live; multi-queue); Devices (headless, video card,
+    audio, VirtIO RNG, i6300esb watchdog, pvpanic, VSOCK, host metrics);
+    Shared folders (virtiofs from a disk, ConfigMap or Secret, with the
+    guest's mount command); vGPU display and boot framebuffer for mediated
+    GPUs; Options (delete protection, start paused, clock, tablet pointer,
+    ACPI, SMBIOS, guest OS tuning). Controls whose KubeVirt feature gate is
+    off are disabled with one line and a link to Settings → Features, but
+    can always be turned off. Where Proxmox has an option KubeVirt lacks
+    (start order, KVM on/off, SPICE, hibernation, disk QoS and SSD
+    emulation, ROM-Bar, x-vga, vIOMMU, USB hot-plug), Hangar says so where
+    a user looks for it. DNS of
     the pod network adapter (what the guest gets by DHCP — cluster DNS,
     search domains, the hosts' domains — and the VM's dnsPolicy/dnsConfig:
     cluster first, the host's servers, or only listed servers; also in the
@@ -212,6 +237,33 @@ history keeps growing, the tasks keep being followed.
   snapshot class for the datastore) the tab says exactly what.
 - **Tasks & events**: all tasks, and the virtualization events of the
   cluster (VMs, instances, migrations, disks, snapshots, host processes).
+- **Settings** (Datacenter settings, `/hangar/settings/features|protection`,
+  where Proxmox has Datacenter → Options and vSphere the cluster's
+  Configure tab):
+  - *Features*: KubeVirt's feature gates grouped by what they unlock in
+    Hangar (disks, devices, sharing, CPU and memory, network), each with an
+    LED (on, off, always on), its maturity (GA, Beta, Alpha, Deprecated,
+    Discontinued, or unknown), where it shows in Hangar and the VMs that
+    use it; other gates listed in the KubeVirt resource, and the rest of
+    the version's table on request. The maturity table is keyed by KubeVirt
+    minor version (`src/model/gates.ts`, v1.7 from the v1.7.0 source); for
+    another version maturity is "unknown" and an unlisted gate's state is
+    unknown too. Next to it, the cluster settings those features need:
+    LiveMigrate workload updates, vmRolloutStrategy, the hot-add ratio and
+    ceilings, the VM state datastore (as KubeVirt picks it:
+    vmStateStorageClass, else the default VM datastore, else the cluster
+    default, RWO unless its profile offers RWX), the default eviction
+    strategy. A user who may patch the KubeVirt resource (SelfSubjectAccessReview)
+    turns a gate on or off after a confirmation that says what changes,
+    flags Alpha features as experimental and lists the VMs that use it;
+    Hangar reads the resource fresh and merge-patches only the
+    featureGates list with its resourceVersion (retry on conflict), and
+    never writes HotplugVolumes with DeclarativeHotplugVolumes. On k4all
+    (its API group is served) the page says k4all will manage these from
+    its KubeVirt addon in a coming release.
+  - *Delete protection*: whether the policy and its binding are installed
+    (GET on both; "cannot tell" without the right to read them), how to
+    install it, the protected VMs.
 
 ## 3. Look and feel
 
@@ -254,6 +306,19 @@ confirm and say what is lost (delete asks to type the name).
   applied with a PUT carrying the resourceVersion: a concurrent change is
   refused, not overwritten. KubeVirt decides what applies live and flags
   RestartRequired for the rest.
+- Delete protection (`src/model/protection.ts`, `src/api/protection.ts`):
+  Configure → Options labels the VM, the dataVolumeTemplates of its disks
+  (so disks created later carry it; CDI copies DataVolume labels to the
+  PVC) and the existing DataVolumes and PVCs; on, the VM first; off, the
+  disks first, so a deletable VM never has undeletable disks its
+  deletion would hang on. CD/DVD media (per-VM ISO copies) are not
+  protected. The admission policy refuses DELETE of labelled
+  VirtualMachines, DataVolumes and PVCs (objectSelector on the old object,
+  reason Forbidden). Hangar's delete flows disable delete for protected
+  VMs and disks with the reason, bulk delete skips them, removing a disk
+  from a protected VM keeps the disk (still protected; Storage → Disks can
+  remove its protection), and a disk move labels the new disk and unlabels
+  the old one before deleting it.
 - Permissions: SelfSubjectAccessReviews (`src/api/permissions.ts`), cached
   5 minutes; actions the user's role does not allow are disabled with the
   reason. `distribution/rbac.yaml` has viewer, VM operator and VM admin
@@ -315,17 +380,22 @@ plugin/
   scripts/gen-icons.mjs      bundles the mdi icons the sources use (prebuild)
   src/index.tsx              registrations: sidebar entry, the route
   src/shell/                 HangarApp (layout), TopBar, Inventory, TasksDock, nav, settings
-  src/views/                 dashboard, vms, vm (page, faceplate, tabs, dialogs), hosts,
-                             storage (datastores, disks, templates), library (images), networks, tasks
+  src/views/                 dashboard, vms, vm (page, faceplate, tabs, dialogs, options,
+                             devices, shared folders), hosts, storage (datastores, disks,
+                             templates), library (images), networks, tasks, settings (features,
+                             delete protection)
   src/wizard/                New VM wizard and its catalog (OS, size profiles, images)
   src/console/               VNC and serial consoles, screenshots, console windows
   src/api/                   resources, client, data provider, actions, metrics, guest
                              agent, permissions
-  src/model/                 pure logic with unit tests: vm, vmspec, edit, tasks, units,
+  src/model/                 pure logic with unit tests: vm, vmspec, edit, vmoptions
+                             (options, devices, CPU, disk settings, shares, hot-add),
+                             gates (feature gate table), protection, tasks, units,
                              hardware (inventory, mappings, passthrough edits),
                              inventory, capacity, alarms, ...
   src/ui/                    tokens, LED, kit (panels, meters, …), DataTable, dialogs
 distribution/node-agent/     the host agent: DaemonSet, agent.sh (bind, inventory), render.awk (JSON)
+distribution/protection-policy.yaml   the delete protection ValidatingAdmissionPolicy
 ```
 
 ```bash
@@ -407,11 +477,27 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
   then the agent rebinds it and KubeVirt needs a reload (the Hardware tab
   says so).
 
+- Hot-plug: KubeVirt skips declarative hot-plug while a VM has
+  `updateVolumesStrategy: Migration` (left by a live disk move): Hangar's
+  hot-plug edits put the default back. CD/DVD media go into a running VM
+  only through an empty drive that existed at power-on (KubeVirt cannot add
+  a drive live); SATA disks cannot be hot-plugged. KubeVirt keeps a disk it
+  created after the disk leaves the VM (owned by the VM): Hangar deletes it
+  when asked, or drops the ownership to keep it.
+- CPU and memory hot-add need the VM to move live (KubeVirt migrates it to
+  resize it): VMs on single-host disks, with host devices or with a
+  persistent TPM on an RWO datastore grow at their next restart. Only
+  sockets can be added; memory needs at least 1 GiB, goes in 2 MiB blocks,
+  and cannot go below the size at power-on while running.
+- Feature gate maturity is known per KubeVirt minor version (v1.7 today);
+  a newer KubeVirt shows "maturity unknown" until the table gains it.
+- vGPU display options apply to mediated devices only and were not tried on
+  a real vGPU.
+
 ## 8. Later
 
-- Disk and NIC hot-plug when the cluster has the HotplugVolumes / interface
-  hot-plug features (today Hangar edits the spec and KubeVirt asks for a
-  restart).
+- NIC hot-plug through the GA HotplugNICs feature (Hangar edits the spec;
+  KubeVirt plugs bridged adapters in live, Hangar does not say so yet).
 - Export a VM or a disk (VirtualMachineExport) and import from other
   virtualizers (CDI's VDDK / oVirt / OpenStack populators).
 - Folder quotas (ResourceQuota) shown as folder capacity.
