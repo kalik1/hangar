@@ -2,7 +2,10 @@
  * New virtual machine: the classic step-by-step wizard. Name and folder,
  * operating system and boot source, CPU and memory, disks, network, guest
  * customization, then a review. With Kubernetes details on, the review can
- * open the VirtualMachine YAML before creating it.
+ * open the VirtualMachine YAML before creating it. On k4all, guest
+ * customization also asks for k4all's metadata service (on by default when
+ * k4all's ClusterConfig turns the service on) and the ServiceAccount whose
+ * tokens the guest gets (model/metadata.ts).
  */
 
 import { Icon } from '@iconify/react';
@@ -27,6 +30,7 @@ import { kpost } from '../api/client';
 import { prepareClipboard } from '../api/clipboard';
 import { HangarData, useHangar } from '../api/data';
 import { useClusterDns } from '../api/dns';
+import { useK4allMetadata, useServiceAccounts } from '../api/k4all';
 import { useNetFacts } from '../api/podnet';
 import { useProtectionPolicy } from '../api/protection';
 import { datastores } from '../model/capacity';
@@ -34,6 +38,7 @@ import { setClipboardAnnotation, sidecarGateOn, sidecarImage } from '../model/cl
 import { DNS_POLICIES, dnsProblems, DnsSettings, hostSearchHint, isDefaultDns } from '../model/dns';
 import { flavorFrom, KIND_CLUSTER, KIND_NS } from '../model/flavors';
 import { folders, L_FOLDER } from '../model/inventory';
+import { CHASSIS_ASSET, L_METADATA, metadataChoice, PSA_ENFORCE, serviceAccountProblem } from '../model/metadata';
 import { preferredDatastore } from '../model/placement';
 import { cidrConflicts, DEFAULT_VM_CIDR, freeVmCidr } from '../model/podnet';
 import { formatBytes, GiB, MiB, parseQuantity } from '../model/units';
@@ -45,6 +50,7 @@ import { K8sName,KV } from '../ui/kit';
 import { tabular } from '../ui/tokens';
 import { useTokens } from '../ui/useTokens';
 import { CpuModelSelect, FlavorPicker, useFlavorFamilies } from '../views/flavors/parts';
+import { K4allLink } from '../views/settings/K4allManaged';
 import { datastoreItems, renderDatastore } from '../views/storage/DatastorePick';
 import { confirmSidecarGate } from '../views/vm/ClipboardPanel';
 import { DnsFields, DnsResult } from '../views/vm/DnsPanel';
@@ -103,6 +109,10 @@ interface State {
   startPaused: boolean;
   headless: boolean;
   sound: '' | 'ich9' | 'ac97';
+  /** k4all's metadata service; null: k4all's default (on when its service is on). */
+  metadata: boolean | null;
+  /** Whose tokens the guest gets; '' = the folder's default ServiceAccount. */
+  serviceAccount: string;
 }
 
 const STEPS: { id: string; label: string }[] = [
@@ -270,6 +280,8 @@ function initialState(d: HangarData, preset: WizardPreset, libraryNs: string): S
     startPaused: false,
     headless: false,
     sound: '',
+    metadata: null,
+    serviceAccount: '',
   };
 }
 
@@ -314,6 +326,10 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
   const clusterDns = useClusterDns();
   const iso = s.sourceKind === 'iso';
   const useCloudInit = s.ciEnabled && !iso && os.cloudInit;
+  const k4 = useK4allMetadata();
+  const mdService = k4.metadata && k4.metadata !== 'unknown' ? k4.metadata : null;
+  const mdOn = metadataChoice(k4.on, k4.metadata, s.metadata);
+  const serviceAccounts = useServiceAccounts(k4.on ? s.folder : undefined, nsExists);
 
   const prefObj = d.preferences.find(p => p.metadata.name === pref);
   const needMem = parseQuantity(prefObj?.spec?.requirements?.memory?.guest);
@@ -346,7 +362,7 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
         : null,
     storage: s.rootGiB < minRoot ? `The image needs at least ${minRoot} GiB.` : null,
     network: s.nics.some(n => !n.network) && dnsProblems(s.dns, clusterDns?.servers.length || 1).length ? 'Fix the DNS settings.' : null,
-    customize: null,
+    customize: mdOn ? (serviceAccountProblem(s.serviceAccount.trim()) ? `ServiceAccount: ${serviceAccountProblem(s.serviceAccount.trim())}` : null) : null,
     review: null,
   };
   const stepOk = (i: number) => !problems[STEPS[i].id];
@@ -407,6 +423,7 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
       startPaused: s.startPaused,
       headless: s.headless,
       sound: s.sound || undefined,
+      metadata: mdOn ? { serviceAccount: s.serviceAccount.trim() || undefined } : undefined,
     };
   };
 
@@ -801,11 +818,78 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
           )}
           </>
         );
-      case 'customize':
+      case 'customize': {
+        const sa = s.serviceAccount.trim();
+        const psa = d.namespaces.find(n => n.metadata.name === s.folder)?.metadata.labels?.[PSA_ENFORCE];
+        const podNic = s.nics.some(n => !n.network);
+        const metadataFields = k4.on && (
+          <>
+            <Field
+              label="Metadata service"
+              help={<>k4all&apos;s, at 169.254.169.254</>}
+            >
+              <FormControlLabel
+                control={<Checkbox checked={mdOn} onChange={e => set({ metadata: e.target.checked })} />}
+                label="Serve instance data and tokens to the guest"
+              />
+              <Typography sx={{ fontSize: 12.5, color: t.muted, ml: 4, mt: -0.5 }}>
+                {k4.metadata === 'unknown'
+                  ? 'Hangar cannot read k4all’s settings to tell whether the service is on in this datacenter.'
+                  : !mdService?.enabled
+                  ? 'k4all’s metadata service is off in this datacenter: the VM gets it once it is turned on.'
+                  : mdService.scope === 'All'
+                  ? 'k4all serves every VM of the datacenter (scope All); this also sets the chassis tag cloud-init looks for.'
+                  : 'OpenStack and EC2 style: instance-id, hostname, SSH keys and user-data from the settings above, and tokens of the ServiceAccount below.'}{' '}
+                {k8s && (
+                  <>
+                    Sets the template label <code>{L_METADATA}</code> and <code>chassis.asset: {CHASSIS_ASSET}</code>.{' '}
+                  </>
+                )}
+                <K4allLink page="virtualization" anchor="metadata">
+                  k4all&apos;s metadata settings
+                </K4allLink>
+              </Typography>
+              {mdOn && (psa === 'baseline' || psa === 'restricted') && (
+                <Typography sx={{ fontSize: 12.5, color: '#B7791F', ml: 4, mt: 0.5 }}>
+                  Folder {s.folder} enforces PodSecurity {psa}: k4all does not inject the service there, the VM keeps its cloud-init disk.
+                </Typography>
+              )}
+              {mdOn && !podNic && (
+                <Typography sx={{ fontSize: 12.5, color: '#B7791F', ml: 4, mt: 0.5 }}>
+                  The VM has no pod network (NAT) adapter: the service is reached through the pod network only.
+                </Typography>
+              )}
+            </Field>
+            {mdOn && (
+              <Field label="ServiceAccount" help="Whose tokens the guest gets.">
+                <Autocomplete
+                  freeSolo
+                  size="small"
+                  options={serviceAccounts ?? []}
+                  value={s.serviceAccount}
+                  onInputChange={(_, v) => set({ serviceAccount: v })}
+                  sx={{ maxWidth: 320 }}
+                  renderInput={params => <TextField {...params} placeholder="default" inputProps={{ ...params.inputProps, 'aria-label': 'ServiceAccount' }} />}
+                />
+                <Typography sx={{ fontSize: 12.5, color: serviceAccountProblem(sa) || (sa && serviceAccounts && !serviceAccounts.includes(sa)) ? '#B7791F' : t.muted, mt: 0.5 }}>
+                  {serviceAccountProblem(sa) ??
+                    (!nsExists
+                      ? `Folder ${s.folder} is new: only its default ServiceAccount exists at first.`
+                      : sa && serviceAccounts && !serviceAccounts.includes(sa)
+                      ? `${sa} does not exist in ${s.folder}: the VM cannot start until it does.`
+                      : `Empty: ${s.folder}'s default ServiceAccount.`)}
+                </Typography>
+              </Field>
+            )}
+          </>
+        );
         return !os.cloudInit || iso ? (
+          <>
           <Typography sx={{ fontSize: 14, color: t.muted, py: 2 }}>
             {iso ? 'Installing from an ISO: you set the users and the hostname in the installer.' : `${os.label} images are not customized here: set them up in the guest.`}
           </Typography>
+          {metadataFields}
+          </>
         ) : (
           <>
             <Field label="Customize the guest" help="With cloud-init, at first boot.">
@@ -845,8 +929,10 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
                 )}
               </>
             )}
+            {metadataFields}
           </>
         );
+      }
       default: {
         const w = input();
         const src =
@@ -877,6 +963,7 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
                   ? [['DNS', [DNS_POLICIES.find(p => p.value === s.dns.policy)!.label, ...s.dns.nameservers, ...s.dns.searches.map(x => `search ${x}`)].join(', ')] as [string, string]]
                   : []),
                 ['Customization', useCloudInit ? (s.ciMode === 'custom' ? 'Your cloud-config' : `User ${s.ciUser || '(image default)'}${s.ciKeys.trim() ? ', SSH keys' : ''}${s.ciPassword ? ', password' : ''}`) : 'None'],
+                ...(k4.on ? [['Metadata service', mdOn ? `On, ServiceAccount ${s.serviceAccount.trim() || 'default'}` : 'Off'] as [string, string]] : []),
               ]}
             />
             <Box sx={{ mt: 2, pt: 2, borderTop: `1px solid ${t.rule}`, display: 'grid', gap: 1 }}>

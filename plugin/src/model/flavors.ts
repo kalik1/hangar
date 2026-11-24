@@ -221,6 +221,8 @@ export interface Requirement {
   /** Hosts that satisfy it. */
   hosts: string[];
   what: string;
+  /** A host setting (k4all sets it from its addon's node settings). */
+  nodeSetting?: 'cpuManager' | 'hugepages';
 }
 
 function hostNames(nodes: Obj[]): string[] {
@@ -234,6 +236,7 @@ export function flavorRequirements(f: Flavor, nodes: Obj[]): Requirement[] {
     out.push({
       what: 'Dedicated CPUs (the kubelet\'s CPU manager, static policy)',
       hosts: nodes.filter(n => n.metadata.labels?.cpumanager === 'true').map(n => n.metadata.name),
+      nodeSetting: 'cpuManager',
     });
   }
   if (f.hugepages) {
@@ -241,6 +244,7 @@ export function flavorRequirements(f: Flavor, nodes: Obj[]): Requirement[] {
     out.push({
       what: `Huge pages of ${f.hugepages}`,
       hosts: nodes.filter(n => parseQuantity(n.status?.allocatable?.[key] ?? '0') >= f.memBytes).map(n => n.metadata.name),
+      nodeSetting: 'hugepages',
     });
   }
   if (f.cpuModel && !['host-model', 'host-passthrough'].includes(f.cpuModel)) {
@@ -250,6 +254,17 @@ export function flavorRequirements(f: Flavor, nodes: Obj[]): Requirement[] {
     out.push({ what: `Device ${dev}`, hosts: nodes.filter(n => parseQuantity(n.status?.allocatable?.[dev] ?? '0') > 0).map(n => n.metadata.name) });
   }
   return out;
+}
+
+/**
+ * The host settings among these requirements, in words ("the static CPU
+ * manager and huge pages"), or null: on k4all they are set from its addon's
+ * node settings.
+ */
+export function nodeSettingsWords(reqs: Requirement[]): string | null {
+  const words = { cpuManager: 'the static CPU manager', hugepages: 'huge pages' } as const;
+  const kinds = [...new Set(reqs.map(r => r.nodeSetting).filter((x): x is 'cpuManager' | 'hugepages' => !!x))];
+  return kinds.length ? kinds.map(k => words[k]).join(' and ') : null;
 }
 
 /** Hosts where every requirement holds. */

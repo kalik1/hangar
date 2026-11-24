@@ -147,7 +147,34 @@ history keeps growing, the tasks keep being followed.
   container registry, empty disk), CPU and memory (custom or size profile,
   firmware, TPM), disks and datastore, network adapters, guest
   customization (form or own cloud-config), review with power policy and
-  maintenance behaviour, Create (or Review YAML).
+  maintenance behaviour, Create (or Review YAML). On k4all, guest
+  customization also asks for k4all's metadata service on 169.254.169.254
+  (on by default when k4all's ClusterConfig turns it on:
+  `spec.features.virt.metadata.enabled`, read instead of looking for the
+  admission policy, whose name is k4all's own detail): the template label
+  `k4all.magesgate.com/metadata: enabled`, `chassis.asset: OpenStack Nova`
+  (cloud-init looks for the service only with it) and a ServiceAccount
+  picker (label `k4all.magesgate.com/service-account`, the folder's
+  `default` without it). The cloud-init disk stays: VMs in folders that
+  enforce PodSecurity baseline or restricted are not injected and keep
+  using it (D8). The VM summary says whether the VM gets the service, what
+  it serves (instance-id = the VM's UID, cloud-init data, tokens) and why
+  not (service off, not asked or opted out with
+  `k4all.magesgate.com/metadata: disabled` under scope All, no pod network
+  adapter, PodSecurity). k4all's Warning Events on the VM (reason
+  `Metadata…` from a k4all component) are history, not state: k4all
+  cannot clear them, they fade with the Event TTL (an hour by default).
+  They become notes with their age ("k4all, 12m ago: …"), the newest of
+  each reason, and those older than the running instance are dropped;
+  `MetadataNotServed` marks the VM not served only when Hangar cannot read
+  the folder, whose labels are current, and `MetadataChassisAsset` is left
+  to the spec check below. Hangar does not read the `k4all-md-<vm>` Secret
+  for the current state: even metadata only needs `get` on Secrets, which
+  also returns their data (user-data, tokens), and a viewer role must not
+  need that. k4all sets the asset tag on the VMs
+  it serves when they have none; a tag of the user's wins, and then
+  cloud-init never looks for the service: the summary and the SMBIOS row
+  and dialog say so for VMs that get the service.
 - **Clone, clone to template, new VM from template**: every persistent disk
   is copied with CDI; the copy gets a new fixed MAC on its NAT adapters
   (none on the others), a new firmware UUID and serial, and its own
@@ -167,8 +194,10 @@ history keeps growing, the tasks keep being followed.
   mapping of identical devices or creates one), **Give back to host**,
   **Offer to VMs** for USB devices and vGPU profiles, **Give to a VM** for
   free disks, **Take back**, **Reload devices**. Banners say when the
-  IOMMU is off, when KubeVirt's passthrough gate is off, and when devices
-  were prepared after KubeVirt's agent started (so VMs may not get them).
+  IOMMU is off (on k4all with a link to the addon's node settings,
+  `/k4all/settings/nodes`, which adds the kernel arguments), when KubeVirt's
+  passthrough gate is off, and when devices were prepared after KubeVirt's
+  agent started (so VMs may not get them).
 - **Device mappings** (from Hosts): what VMs can ask for, Proxmox's
   resource mappings: name, kind (GPU, PCI device, vGPU profile, USB
   device), what it matches, free of total per host, the VMs asking for
@@ -230,7 +259,9 @@ history keeps growing, the tasks keep being followed.
     functions, Real time, and Hangar's own), each size with vCPU, memory,
     CPU model, extras (dedicated CPUs, huge pages, NUMA, overcommit, GPU),
     the hosts that can run it (CPU manager, huge pages, CPU model, device
-    resources from the node) and the VMs using it. KubeVirt's flavors are
+    resources from the node; on k4all a missing CPU manager or huge pages
+    links to the addon's node settings, `/k4all/settings/nodes`) and the
+    VMs using it. KubeVirt's flavors are
     read-only ("Make a custom copy"); Hangar's (label
     `hangar.magesgate.com/flavor-family`, cluster-wide or one folder) are
     created as a ladder of sizes from a purpose and a memory-per-vCPU
@@ -275,8 +306,18 @@ history keeps growing, the tasks keep being followed.
     Hangar reads the resource fresh and merge-patches only the
     featureGates list with its resourceVersion (retry on conflict), and
     never writes HotplugVolumes with DeclarativeHotplugVolumes. On k4all
-    (its API group is served) the page says k4all will manage these from
-    its KubeVirt addon in a coming release.
+    (its API group is served) the gates k4all's ClusterConfig turns on or
+    off (the annotations `k4all.magesgate.com/feature-gates` and
+    `k4all.magesgate.com/disabled-feature-gates` on the KubeVirt resource:
+    the lists have a single manager) are read-only, "Managed by k4all —
+    change it in the k4all addon", linked to
+    `/k4all/settings/virtualization#feature-gates`; the others Hangar turns
+    on and off as before, and k4all keeps them (it removes only its own).
+    What k4all's operator applies (`model/ownership.ts`, managedFields,
+    manager exactly `k4all-operator`) is read-only too: the VM state
+    datastore and software emulation (links to the addon), the release's
+    update methods ("set by the k4all release"). cpuModel, evictionStrategy,
+    vmRolloutStrategy and the device mappings stay Hangar's.
   - *Delete protection*: whether the policy and its binding are installed
     (GET on both; "cannot tell" without the right to read them), how to
     install it, the protected VMs.
@@ -407,6 +448,7 @@ plugin/
   src/model/                 pure logic with unit tests: vm, vmspec, edit, vmoptions
                              (options, devices, CPU, disk settings, shares, hot-add),
                              gates (feature gate table), protection, tasks, units,
+                             ownership (k4all's fields, shared with Cairn), metadata,
                              hardware (inventory, mappings, passthrough edits),
                              inventory, capacity, alarms, ...
   src/ui/                    tokens, LED, kit (panels, meters, …), DataTable, dialogs
@@ -549,3 +591,7 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
 - Folder quotas (ResourceQuota) shown as folder capacity.
 - VM–VM affinity rules ("keep apart", "keep together") as DRS-like groups.
 - Translations (Italian first) through Headlamp's i18n.
+- A current-state signal for k4all's metadata warnings that is not a
+  Secret (e.g. a condition or an annotation on the VM, written and cleared
+  by the operator), so the VM summary need not read Events as history: to
+  decide with k4all.

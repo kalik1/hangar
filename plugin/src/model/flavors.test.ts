@@ -13,6 +13,7 @@ import {
   flavorRequirements,
   hostCpus,
   modelMatrix,
+  nodeSettingsWords,
   setCpuModel,
   setFlavor,
   updatedFlavor,
@@ -117,6 +118,10 @@ describe('flavors and families', () => {
       ['Dedicated CPUs', ['intel-b']],
       ['Huge pages of 2Mi', ['intel-b']],
     ]);
+    expect(req.map(r => r.nodeSetting)).toEqual(['cpuManager', 'hugepages']);
+    expect(nodeSettingsWords(req)).toBe('the static CPU manager and huge pages');
+    expect(nodeSettingsWords(req.slice(1))).toBe('huge pages');
+    expect(nodeSettingsWords(flavorRequirements(flavorFrom(objs[3]), nodes))).toBeNull();
     expect(flavorHosts(cx, nodes)).toEqual(['intel-b']);
     expect(flavorHosts(flavorFrom(objs[3]), nodes)).toEqual(['intel-a', 'intel-b', 'amd-a']);
   });

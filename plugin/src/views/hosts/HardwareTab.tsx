@@ -18,6 +18,7 @@ import { useHistory } from 'react-router-dom';
 import { kreq } from '../../api/client';
 import { useHangar } from '../../api/data';
 import * as H from '../../api/hardware';
+import { useK4all } from '../../api/k4all';
 import { NOT_ALLOWED, useCan } from '../../api/permissions';
 import {
   availability,
@@ -50,6 +51,7 @@ import { Led } from '../../ui/Led';
 import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
 import { DeviceStateLabel, GiveDiskDialog, GivePciDialog, MdevMappingDialog, NoAgent, UsbMappingDialog } from '../devices/parts';
+import { K4allLink } from '../settings/K4allManaged';
 import { Note } from '../storage/parts';
 
 const quiet = (p: Promise<unknown>) => p.catch(() => undefined);
@@ -137,6 +139,7 @@ function Table({ head, children, label }: { head: React.ReactNode[]; children: R
 }
 
 export function HardwareTab({ host }: { host: string }) {
+  const k4all = useK4all();
   const d = useHangar();
   const t = useTokens();
   const k8s = useK8s();
@@ -320,8 +323,17 @@ export function HardwareTab({ host }: { host: string }) {
         <Box sx={{ display: 'grid', gap: 1.5 }}>
           {!iommuOn(inv) && (
             <Note tone="warn">
-              The IOMMU is off on this host, so no device can go to a VM. Turn on VT-d (Intel) or AMD-Vi in the firmware, add{' '}
-              <code>intel_iommu=on iommu=pt</code> or <code>amd_iommu=on iommu=pt</code> to the kernel arguments, and restart the host.
+              {k4all ? (
+                <>
+                  The IOMMU is off on this host, so no device can go to a VM. Turn on VT-d (Intel) or AMD-Vi in the firmware; k4all adds the kernel arguments
+                  and restarts the hosts from its addon&apos;s node settings (IOMMU). <K4allLink page="nodes">Open node settings</K4allLink>
+                </>
+              ) : (
+                <>
+                  The IOMMU is off on this host, so no device can go to a VM. Turn on VT-d (Intel) or AMD-Vi in the firmware, add{' '}
+                  <code>intel_iommu=on iommu=pt</code> or <code>amd_iommu=on iommu=pt</code> to the kernel arguments, and restart the host.
+                </>
+              )}
             </Note>
           )}
           {stale && (

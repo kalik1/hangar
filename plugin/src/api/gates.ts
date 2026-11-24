@@ -1,16 +1,18 @@
 /*
  * KubeVirt feature gates: turning one on or off (only the featureGates and
  * disabledFeatureGates lists of the KubeVirt resource, read fresh and
- * written with its resourceVersion), whether the user may, and whether k4all runs the
- * cluster (it will manage KubeVirt's features from its own addon).
+ * written with its resourceVersion), and whether the user may. On k4all the
+ * gates its ClusterConfig lists are its own (read-only, model/gates.ts
+ * k4allKubevirt); k4all keeps the others Hangar sets (union, D2).
  */
 
 import React from 'react';
-import { disabledGates, gateState, gateTable, nextGates } from '../model/gates';
+import { disabledGates, gateState, gateTable, k4allKubevirt, nextGates } from '../model/gates';
 import { Obj } from '../model/types';
 import { runTask } from './actions';
-import { currentCluster, kmerge, kreq } from './client';
+import { kmerge, kreq } from './client';
 import { useHangar } from './data';
+import { isK4all } from './k4all';
 import { useCan } from './permissions';
 
 const kvPath = (kv: Obj) => `/apis/kubevirt.io/v1/namespaces/${kv.metadata.namespace}/kubevirts/${kv.metadata.name}`;
@@ -21,6 +23,10 @@ export function setFeatureGate(kv: Obj, name: string, on: boolean) {
     for (let attempt = 0; ; attempt++) {
       const fresh = await kreq<Obj>(kvPath(kv));
       const next = nextGates(fresh, name, on);
+      // A gate k4all's ClusterConfig lists is k4all's: it would put it back.
+      const owned = k4allKubevirt(fresh, await isK4all());
+      const theirs = [name, ...next.removed].find(g => owned.gatesOn.includes(g) || owned.gatesOff.includes(g));
+      if (theirs) throw new Error(`${theirs} is set by k4all: change it in the k4all addon (Settings → Virtualization).`);
       // disabledFeatureGates exists from KubeVirt v1.8: written only where KubeVirt has it.
       const writeDisabled = !!gateTable(fresh)?.disabledList || disabledGates(fresh).length > 0;
       try {
@@ -44,31 +50,6 @@ export function setFeatureGate(kv: Obj, name: string, on: boolean) {
 /** The user may change the KubeVirt resource. */
 export function useCanPatchKubevirt(kv: Obj | null): boolean {
   return useCan(kv ? { verb: 'patch', group: 'kubevirt.io', resource: 'kubevirts', namespace: kv.metadata.namespace as string } : null);
-}
-
-const k4allCache = new Map<string, Promise<boolean>>();
-
-/** k4all runs this cluster: its API group (clusterconfigs.k4all.magesgate.com) is served. */
-export function useK4all(): boolean {
-  const [on, setOn] = React.useState(false);
-  const cluster = currentCluster();
-  React.useEffect(() => {
-    let alive = true;
-    let p = k4allCache.get(cluster);
-    if (!p) {
-      // Discovery is open to every authenticated user: 200 when the group exists.
-      p = kreq('/apis/k4all.magesgate.com').then(
-        () => true,
-        (e: any) => e?.status === 403
-      );
-      k4allCache.set(cluster, p);
-    }
-    p.then(v => alive && setOn(v));
-    return () => {
-      alive = false;
-    };
-  }, [cluster]);
-  return on;
 }
 
 export interface GateCheck {

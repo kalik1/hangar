@@ -11,6 +11,7 @@
  */
 
 import { GATE_TABLES } from './gateTables';
+import { k4allAnnotationList, k4allOwns } from './ownership';
 import { Obj } from './types';
 
 export type Maturity = 'GA' | 'Beta' | 'Alpha' | 'Deprecated' | 'Discontinued';
@@ -326,23 +327,63 @@ export function vmsUsingGate(vms: Obj[], gate: string): Obj[] {
 
 export interface GateRow extends GateState {
   feature?: HangarFeature;
+  /** k4all turns it on or off (its ClusterConfig lists it): read-only here, changed in the k4all addon. */
+  k4all?: 'on' | 'off';
 }
 
 /**
  * Every gate to show: Hangar's (in catalog order), then the others listed
- * in the KubeVirt resource, then the rest of the version's table.
+ * in the KubeVirt resource, then the rest of the version's table. With
+ * `owned`, the gates k4all turns on or off are marked.
  */
-export function gateRows(kv: Obj | null | undefined): { hangar: GateRow[]; listedOther: GateRow[]; other: GateRow[] } {
+export function gateRows(kv: Obj | null | undefined, owned?: K4allKubevirt): { hangar: GateRow[]; listedOther: GateRow[]; other: GateRow[] } {
+  const mark = (r: GateRow): GateRow => {
+    const k4all = owned?.gatesOn.includes(r.name) ? 'on' : owned?.gatesOff.includes(r.name) ? 'off' : undefined;
+    return k4all ? { ...r, k4all } : r;
+  };
   const known = new Set(HANGAR_FEATURES.map(f => f.gate));
-  const hangar = HANGAR_FEATURES.map(f => ({ ...gateState(kv, f.gate), feature: f }));
+  const hangar = HANGAR_FEATURES.map(f => mark({ ...gateState(kv, f.gate), feature: f }));
   const listed = listedGates(kv).filter(g => !known.has(g));
-  const listedOther = [...new Set(listed)].map(g => gateState(kv, g));
+  const listedOther = [...new Set(listed)].map(g => mark(gateState(kv, g)));
   const table = gateTable(kv);
   const other = Object.keys(table?.gates ?? {})
     .filter(g => !known.has(g) && !listed.includes(g))
     .sort((a, b) => a.localeCompare(b))
-    .map(g => gateState(kv, g));
+    .map(g => mark(gateState(kv, g)));
   return { hangar, listedOther, other };
+}
+
+/* ------------------------------------------------- what k4all owns (D2, D3) */
+
+/** What k4all records on the KubeVirt resource for the gates it added (R6). */
+export const K4ALL_GATES_ANNOTATION = 'k4all.magesgate.com/feature-gates';
+export const K4ALL_DISABLED_GATES_ANNOTATION = 'k4all.magesgate.com/disabled-feature-gates';
+
+/**
+ * The parts of the KubeVirt resource k4all owns, so Hangar shows them
+ * read-only: the gates its ClusterConfig turns on or off (its annotations:
+ * the gate lists themselves have a single manager), and the settings its
+ * operator applies (managedFields). cpuModel, evictionStrategy,
+ * vmRolloutStrategy and permittedHostDevices stay Hangar's (D3). Nothing
+ * when k4all does not run the cluster.
+ */
+export interface K4allKubevirt {
+  useEmulation: boolean;
+  vmStateStorageClass: boolean;
+  /** The release invariant [LiveMigrate]. */
+  workloadUpdateMethods: boolean;
+  gatesOn: string[];
+  gatesOff: string[];
+}
+
+export function k4allKubevirt(kv: Obj | null | undefined, k4all: boolean): K4allKubevirt {
+  return {
+    useEmulation: k4allOwns(kv, 'spec.configuration.developerConfiguration.useEmulation', k4all),
+    vmStateStorageClass: k4allOwns(kv, 'spec.configuration.vmStateStorageClass', k4all),
+    workloadUpdateMethods: k4allOwns(kv, 'spec.workloadUpdateStrategy.workloadUpdateMethods', k4all),
+    gatesOn: k4all ? k4allAnnotationList(kv, K4ALL_GATES_ANNOTATION) : [],
+    gatesOff: k4all ? k4allAnnotationList(kv, K4ALL_DISABLED_GATES_ANNOTATION) : [],
+  };
 }
 
 /** Problems with the gate list as written. */
@@ -375,6 +416,8 @@ export interface ClusterSettings {
   /** Where persistent UEFI/TPM state lives; undefined: KubeVirt's fallback. */
   vmStateStorageClass?: string;
   evictionStrategy?: string;
+  /** developerConfiguration.useEmulation: VMs run without KVM. */
+  useEmulation: boolean;
 }
 
 export function clusterSettings(kv: Obj | null | undefined): ClusterSettings {
@@ -391,6 +434,7 @@ export function clusterSettings(kv: Obj | null | undefined): ClusterSettings {
     maxGuest: lu.maxGuest,
     vmStateStorageClass: c.vmStateStorageClass || undefined,
     evictionStrategy: c.evictionStrategy,
+    useEmulation: c.developerConfiguration?.useEmulation === true,
   };
 }
 

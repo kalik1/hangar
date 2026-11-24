@@ -13,13 +13,15 @@ import Typography from '@mui/material/Typography';
 import React from 'react';
 import { useHangar } from '../../api/data';
 import { useFolderFlavors } from '../../api/flavors';
-import { cpuPresets, cpuVerdict, families, Family, Flavor, flavorHosts, flavorRequirements, hostCpus, KIND_CLUSTER, modelMatrix } from '../../model/flavors';
+import { useK4all } from '../../api/k4all';
+import { cpuPresets, cpuVerdict, families, Family, Flavor, flavorHosts, flavorRequirements, hostCpus, KIND_CLUSTER, modelMatrix, nodeSettingsWords } from '../../model/flavors';
 import { Obj } from '../../model/types';
 import { formatBytes } from '../../model/units';
 import { useK8s } from '../../shell/settings';
 import { K8sName } from '../../ui/kit';
 import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
+import { K4allNodesHint } from '../settings/K4allManaged';
 
 export const TONE: Record<string, string> = { good: '#2FBF71', ok: '#3D8BFD', warn: '#B7791F', bad: '#E5484D' };
 
@@ -209,6 +211,7 @@ export function FlavorPicker({
   nodes: Obj[];
 }) {
   const t = useTokens();
+  const k4all = useK4all();
   const { fams } = useFlavorFamilies(namespace);
   return (
     <Box sx={{ display: 'grid', gap: 1.5 }}>
@@ -228,6 +231,7 @@ export function FlavorPicker({
             {unmet.length > 0 && (
               <Typography sx={{ fontSize: 12.5, color: '#B7791F' }}>No host has {unmet.map(u => u.what.charAt(0).toLowerCase() + u.what.slice(1)).join(' or ')}: these sizes cannot start here.</Typography>
             )}
+            {k4all && nodeSettingsWords(unmet) && <K4allNodesHint what={nodeSettingsWords(unmet)!} sx={{ display: 'block' }} />}
             <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mt: 0.5 }}>
               {flavors.map(f => {
                 const on = value?.name === f.name && (value?.kind ?? KIND_CLUSTER) === f.kind;

@@ -97,6 +97,18 @@ describe('buildVm', () => {
     ]);
     expect(buildVm(base).spec.template.spec.networks[0]).toEqual({ name: 'default', pod: {} });
   });
+  it('asks for k4all’s metadata service on the VM template, with the chassis tag cloud-init looks for', () => {
+    const vm = buildVm({ ...base, labels: { team: 'web' }, metadata: { serviceAccount: 'builder' }, cloudInit: { user: 'admin' } });
+    expect(vm.spec.template.metadata.labels).toEqual({ team: 'web', 'k4all.magesgate.com/metadata': 'enabled', 'k4all.magesgate.com/service-account': 'builder' });
+    // on the template only: the VM object keeps its own tags
+    expect(vm.metadata.labels).toEqual({ team: 'web' });
+    expect(vm.spec.template.spec.domain.chassis).toEqual({ asset: 'OpenStack Nova' });
+    // the cloud-init disk stays (PodSecurity baseline folders, D8)
+    expect(vm.spec.template.spec.volumes.some((v: any) => v.cloudInitNoCloud)).toBe(true);
+    const plain = buildVm(base);
+    expect(plain.spec.template.metadata.labels['k4all.magesgate.com/metadata']).toBeUndefined();
+    expect(plain.spec.template.spec.domain.chassis).toBeUndefined();
+  });
   it('writes cloud-config with keys and password', () => {
     const u = cloudInitUserData({ user: 'admin', password: 'p"w', sshKeys: ['k1', ' '] }, 'h');
     expect(u).toContain('user: admin');

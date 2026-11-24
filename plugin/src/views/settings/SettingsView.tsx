@@ -8,6 +8,9 @@
  *                      Configure → Options → Protection is installed, and
  *                      what it protects.
  * Deep links: /hangar/settings/<section>[/<gate>] (the gate is highlighted).
+ * On k4all, what k4all owns (the gates its ClusterConfig lists, emulation,
+ * the VM state datastore, the update methods of its release) is shown
+ * read-only with a link to the k4all addon; the rest stays Hangar's.
  */
 
 import { Icon } from '@iconify/react';
@@ -21,7 +24,8 @@ import Typography from '@mui/material/Typography';
 import React from 'react';
 import { Link as RouterLink, useHistory } from 'react-router-dom';
 import { HangarData, useHangar } from '../../api/data';
-import { setFeatureGate, useCanPatchKubevirt, useK4all } from '../../api/gates';
+import { setFeatureGate, useCanPatchKubevirt } from '../../api/gates';
+import { useK4all } from '../../api/k4all';
 import { NOT_ALLOWED } from '../../api/permissions';
 import { useProtectionPolicy } from '../../api/protection';
 import {
@@ -35,6 +39,8 @@ import {
   gateTable,
   HOTPLUG_DECLARATIVE,
   HOTPLUG_OLD,
+  K4allKubevirt,
+  k4allKubevirt,
   kubevirtVersion,
   listedGates,
   nextGates,
@@ -42,6 +48,7 @@ import {
   vmStateDatastore,
   vmsUsingGate,
 } from '../../model/gates';
+import { K4ALL_MANAGED } from '../../model/ownership';
 import { isProtected, PROTECTED_LABEL, PROTECTION_POLICY, PROTECTION_POLICY_URL } from '../../model/protection';
 import { Obj } from '../../model/types';
 import { EVICTION_LABELS, key } from '../../model/vm';
@@ -53,6 +60,7 @@ import { Led } from '../../ui/Led';
 import { LedTone, tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
 import { Note } from '../storage/parts';
+import { K4allLink, K4allManaged } from './K4allManaged';
 
 const quiet = (p: Promise<unknown>) => p.catch(() => undefined);
 
@@ -187,7 +195,7 @@ async function toggleGate(d: HangarData, kv: Obj, r: GateRow, on: boolean, k4all
             {users.length > 5 ? ', …' : ''}): running ones keep it until they power off, then KubeVirt refuses to start them until it is back on.
           </p>
         )}
-        {k4all && <p>On k4all, a coming release manages KubeVirt&apos;s features from its KubeVirt addon; until then the change is made here.</p>}
+        {k4all && <p>k4all keeps the change: it adds and removes only the features its own settings list.</p>}
       </>
     ),
     confirm: on ? 'Turn on' : 'Turn off',
@@ -196,7 +204,7 @@ async function toggleGate(d: HangarData, kv: Obj, r: GateRow, on: boolean, k4all
   if (ok) quiet(setFeatureGate(kv, r.name, on));
 }
 
-function GateLine({ r, d, kv, canPatch, k4all, focus }: { r: GateRow; d: HangarData; kv: Obj | null; canPatch: boolean; k4all: boolean; focus?: string }) {
+function GateLine({ r, d, kv, canPatch, k4all, owned, focus }: { r: GateRow; d: HangarData; kv: Obj | null; canPatch: boolean; k4all: boolean; owned: K4allKubevirt; focus?: string }) {
   const t = useTokens();
   const k8s = useK8s();
   const ref = React.useRef<HTMLDivElement>(null);
@@ -205,8 +213,10 @@ function GateLine({ r, d, kv, canPatch, k4all, focus }: { r: GateRow; d: HangarD
     if (focused) ref.current?.scrollIntoView({ block: 'center' });
   }, [focused]);
   const s = stateOf(r);
-  const toggleable = !!kv && r.maturity !== 'GA' && r.maturity !== 'Discontinued' && (r.maturity !== null || r.listed);
-  const why = !kv ? 'KubeVirt is not readable' : !canPatch ? NOT_ALLOWED : undefined;
+  const toggleable = !!kv && !r.k4all && r.maturity !== 'GA' && r.maturity !== 'Discontinued' && (r.maturity !== null || r.listed);
+  // Turning this one on would turn off a rival that k4all keeps on (the two hot-plug gates).
+  const rival = kv && !r.on ? nextGates(kv, r.name, true).removed.find(g => owned.gatesOn.includes(g)) : undefined;
+  const why = !kv ? 'KubeVirt is not readable' : !canPatch ? NOT_ALLOWED : rival ? `Turning it on turns off ${rival}, which k4all keeps on` : undefined;
   const users = vmsUsingGate(d.vms, r.name);
   return (
     <Box
@@ -244,6 +254,16 @@ function GateLine({ r, d, kv, canPatch, k4all, focus }: { r: GateRow; d: HangarD
         </Box>
         {(r.note || (r.feature?.note && r.on !== true)) && <Box sx={{ fontSize: 12.5, color: r.note ? '#B7791F' : t.muted, mt: 0.5 }}>{r.note ?? r.feature?.note}</Box>}
         {k8s && r.listed && r.maturity === 'GA' && <Box sx={{ fontSize: 12.5, color: t.muted, mt: 0.25 }}>Listed in developerConfiguration.featureGates</Box>}
+        {r.k4all && (
+          <K4allManaged page="virtualization" anchor="feature-gates" sx={{ mt: 0.5 }}>
+            k4all turns it {r.k4all}
+          </K4allManaged>
+        )}
+        {rival && (
+          <K4allManaged page="virtualization" anchor="feature-gates" sx={{ mt: 0.5 }}>
+            k4all keeps {rival} on, and KubeVirt cannot use both
+          </K4allManaged>
+        )}
       </Box>
       <Box>
         {toggleable ? (
@@ -255,6 +275,12 @@ function GateLine({ r, d, kv, canPatch, k4all, focus }: { r: GateRow; d: HangarD
                 onChange={e => kv && toggleGate(d, kv, r, e.target.checked, k4all)}
                 inputProps={{ 'aria-label': `${r.name}: ${r.feature?.unlocks ?? ''}` }}
               />
+            </span>
+          </Tooltip>
+        ) : r.k4all && r.maturity !== 'GA' && r.maturity !== 'Discontinued' ? (
+          <Tooltip title={K4ALL_MANAGED}>
+            <span>
+              <Switch checked={!!r.on} disabled inputProps={{ 'aria-label': `${r.name}: ${K4ALL_MANAGED}` }} />
             </span>
           </Tooltip>
         ) : (
@@ -284,7 +310,7 @@ function SettingRow({ label, ok, children, k8sName }: { label: string; ok?: bool
   );
 }
 
-function ClusterSettingsPanel({ d }: { d: HangarData }) {
+function ClusterSettingsPanel({ d, owned }: { d: HangarData; owned: K4allKubevirt }) {
   const kv = d.kubevirt;
   const c = clusterSettings(kv);
   const state = vmStateDatastore(kv, d.storageClasses);
@@ -294,7 +320,15 @@ function ClusterSettingsPanel({ d }: { d: HangarData }) {
       <SettingRow label="KubeVirt may move running VMs" ok={c.liveMigrateUpdates} k8sName={`workloadUpdateStrategy.workloadUpdateMethods: [${c.workloadUpdateMethods.join(', ')}]`}>
         {c.liveMigrateUpdates
           ? 'Yes (LiveMigrate): CPUs and memory can be added while a VM runs, disks move live, KubeVirt updates do not stop VMs.'
+          : owned.workloadUpdateMethods
+          ? 'No: adding CPUs or memory and live disk moves wait for a restart.'
           : 'No: adding CPUs or memory and live disk moves wait for a restart. Add LiveMigrate to spec.workloadUpdateStrategy.workloadUpdateMethods of the KubeVirt resource.'}
+        {owned.workloadUpdateMethods && (
+          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, fontSize: 12.5, mt: 0.5 }}>
+            <Icon icon="mdi:lock-outline" width={14} style={{ flex: 'none', position: 'relative', top: 2 }} />
+            Set by the k4all release.
+          </Box>
+        )}
       </SettingRow>
       <SettingRow label="Changes reach running VMs" ok={c.rollout === 'LiveUpdate'} k8sName={`vmRolloutStrategy: ${c.rollout}${c.rolloutSet ? '' : ' (default)'}`}>
         {c.rollout === 'LiveUpdate'
@@ -315,7 +349,14 @@ function ClusterSettingsPanel({ d }: { d: HangarData }) {
         {state.how === 'default' && <>Not chosen: KubeVirt uses the cluster&apos;s default datastore, {state.name}.</>}
         {state.how === 'none' && <>Not chosen and there is no default datastore: VMs with a persistent TPM or UEFI variables cannot start.</>}
         {state.how !== 'none' && ` Access: ${vmStateAccess(kv, d.storageProfiles, state.name) === 'RWX' ? 'shared (RWX).' : 'one host at a time (RWO): KubeVirt copies the state to a new disk when the VM moves live.'}`}
-        {state.how !== 'set' && ' Set spec.configuration.vmStateStorageClass of the KubeVirt resource to a shared (RWX file) datastore to choose.'}
+        {state.how !== 'set' && !owned.vmStateStorageClass && ' Set spec.configuration.vmStateStorageClass of the KubeVirt resource to a shared (RWX file) datastore to choose.'}
+        {owned.vmStateStorageClass && <K4allManaged page="virtualization" anchor="vm-state" sx={{ mt: 0.5 }} />}
+      </SettingRow>
+      <SettingRow label="Software emulation" ok={!c.useEmulation} k8sName={`developerConfiguration.useEmulation: ${c.useEmulation}`}>
+        {c.useEmulation
+          ? 'On: VMs run without KVM, much slower. For hosts without hardware virtualization (nested labs).'
+          : 'Off: VMs use the hosts’ hardware virtualization (KVM).'}
+        {owned.useEmulation && <K4allManaged page="virtualization" sx={{ mt: 0.5 }} />}
       </SettingRow>
       <SettingRow label="On host maintenance (default)" k8sName={`evictionStrategy: ${c.evictionStrategy ?? '(not set)'}`}>
         {EVICTION_LABELS[evict] ?? evict}. Each VM can choose its own in Configure → Power and availability.
@@ -329,8 +370,9 @@ function Features({ d, focus }: { d: HangarData; focus?: string }) {
   const kv = d.kubevirt;
   const canPatch = useCanPatchKubevirt(kv);
   const k4all = useK4all();
+  const owned = k4allKubevirt(kv, k4all);
   const [more, setMore] = React.useState(false);
-  const rows = gateRows(kv);
+  const rows = gateRows(kv, owned);
   const table = gateTable(kv);
   const problems = gateProblems(kv);
   const focusOther = !!focus && rows.other.some(r => r.name === focus);
@@ -351,7 +393,14 @@ function Features({ d, focus }: { d: HangarData; focus?: string }) {
       <Box sx={{ display: 'grid', gap: 2, minWidth: 0 }}>
         {k4all && (
           <Note icon={<Icon icon="mdi:information-outline" width={16} style={{ marginTop: 2 }} />}>
-            This datacenter runs <b>k4all</b>. A coming k4all release manages KubeVirt&apos;s features from its own KubeVirt addon; until then you can turn them on and off here.
+            This datacenter runs <b>k4all</b>.{' '}
+            {owned.gatesOn.length + owned.gatesOff.length
+              ? `The features its settings turn on or off (${[...owned.gatesOn, ...owned.gatesOff].join(', ')}) are changed in the k4all addon; you turn the others on and off here, and k4all keeps them.`
+              : 'Its settings turn no feature on or off: you turn them on and off here, and k4all keeps them.'}
+{' '}
+            <K4allLink page="virtualization" anchor="feature-gates">
+              Open the k4all addon
+            </K4allLink>
           </Note>
         )}
         {problems.map(p => (
@@ -366,7 +415,7 @@ function Features({ d, focus }: { d: HangarData; focus?: string }) {
           return (
             <Panel key={a.id} title={a.title} icon={a.icon} dense>
               {list.map(r => (
-                <GateLine key={r.name} r={r} d={d} kv={kv} canPatch={canPatch} k4all={k4all} focus={focus} />
+                <GateLine key={r.name} r={r} d={d} kv={kv} canPatch={canPatch} k4all={k4all} owned={owned} focus={focus} />
               ))}
             </Panel>
           );
@@ -374,7 +423,7 @@ function Features({ d, focus }: { d: HangarData; focus?: string }) {
         {rows.listedOther.length > 0 && (
           <Panel title="Other features listed in KubeVirt" icon="mdi:format-list-bulleted" dense>
             {rows.listedOther.map(r => (
-              <GateLine key={r.name} r={r} d={d} kv={kv} canPatch={false} k4all={k4all} focus={focus} />
+              <GateLine key={r.name} r={r} d={d} kv={kv} canPatch={false} k4all={k4all} owned={owned} focus={focus} />
             ))}
           </Panel>
         )}
@@ -389,7 +438,7 @@ function Features({ d, focus }: { d: HangarData; focus?: string }) {
           }
         >
           {more ? (
-            rows.other.map(r => <GateLine key={r.name} r={r} d={d} kv={kv} canPatch={false} k4all={k4all} focus={focus} />)
+            rows.other.map(r => <GateLine key={r.name} r={r} d={d} kv={kv} canPatch={false} k4all={k4all} owned={owned} focus={focus} />)
           ) : (
             <Box sx={{ px: 2, py: 1.25, fontSize: 13, color: t.muted }}>
               Features Hangar does not use (security, encryption, other architectures, KubeVirt internals). Hangar shows them, KubeVirt&apos;s administrators decide about them.
@@ -399,7 +448,7 @@ function Features({ d, focus }: { d: HangarData; focus?: string }) {
         {table && <Box sx={{ fontSize: 12.5, color: t.muted }}>{versionLine}</Box>}
       </Box>
       <Box sx={{ display: 'grid', gap: 2, minWidth: 0 }}>
-        <ClusterSettingsPanel d={d} />
+        <ClusterSettingsPanel d={d} owned={owned} />
         <Panel title="Not in KubeVirt" icon="mdi:information-outline">
           <Box component="ul" sx={{ m: 0, pl: 2.25, fontSize: 13, color: t.muted, lineHeight: 1.6 }}>
             <li>Start and shutdown order or delays between VMs: each VM has its own power policy.</li>

@@ -64,3 +64,22 @@ export const gateHref = (gate?: string) => hrefFor('settings', 'features', gate)
 
 /** Links to a VM's page and tab. */
 export const vmHref = (ns: string, name: string, tab?: string) => hrefFor('vm', ns, name, tab);
+
+/** Pages of the k4all addon (k4all spec §13) and their anchors. */
+export type K4allPage = 'virtualization' | 'nodes' | 'storage';
+export type K4allAnchor = 'feature-gates' | 'vm-state' | 'metadata';
+
+/**
+ * A page of the k4all addon's settings (/k4all/settings/<page>#<anchor>),
+ * built on its settings route; null when the k4all plugin is not loaded.
+ */
+export function k4allHref(page: K4allPage, anchor?: K4allAnchor): string | null {
+  let base = '';
+  try {
+    base = Router.createRouteURL('k4all-settings', {});
+  } catch {
+    return null;
+  }
+  if (!base || base === '/') return null;
+  return `${base.replace(/\/$/, '')}/${page}${anchor ? `#${anchor}` : ''}`;
+}
