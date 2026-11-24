@@ -15,6 +15,19 @@ export interface Meta {
   annotations?: Record<string, string>;
   ownerReferences?: { kind: string; name: string; uid?: string; apiVersion?: string; controller?: boolean }[];
   generation?: number;
+  /** Who wrote which field (src/model/ownership.ts). */
+  managedFields?: ManagedFieldsEntry[];
+}
+
+/** One writer's fields, as the API server records them (FieldsV1 tree). */
+export interface ManagedFieldsEntry {
+  manager?: string;
+  operation?: string;
+  apiVersion?: string;
+  fieldsType?: string;
+  fieldsV1?: Record<string, unknown>;
+  subresource?: string;
+  time?: string;
 }
 
 export interface Obj {

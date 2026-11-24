@@ -136,3 +136,63 @@ describe('feature gates by KubeVirt minor', () => {
     expect(G.gateState(kv(['HotplugVolumes'], 'v1.9.1'), 'DeclarativeHotplugVolumes').on).toBe(false);
   });
 });
+
+describe('what k4all owns on the KubeVirt resource', () => {
+  /** A v2.7 KubeVirt CR: k4all added Sidecar and turned VideoConfig off; owns useEmulation, vmStateStorageClass, workloadUpdateMethods. */
+  const owned = (): any => ({
+    ...kv(['Sidecar', 'Snapshot', 'VSOCK'], 'v1.9.1', { spec: { workloadUpdateStrategy: { workloadUpdateMethods: ['LiveMigrate'] } }, configuration: { vmStateStorageClass: 'ceph-rbd', cpuModel: 'host-model' } }, ['VideoConfig']),
+    metadata: {
+      name: 'kubevirt',
+      namespace: 'kubevirt',
+      annotations: { 'k4all.magesgate.com/feature-gates': 'Sidecar', 'k4all.magesgate.com/disabled-feature-gates': 'VideoConfig' },
+      managedFields: [
+        {
+          manager: 'k4all-operator',
+          operation: 'Apply',
+          fieldsType: 'FieldsV1',
+          fieldsV1: {
+            'f:spec': {
+              'f:configuration': { 'f:developerConfiguration': { 'f:disabledFeatureGates': {}, 'f:featureGates': {}, 'f:useEmulation': {} }, 'f:vmStateStorageClass': {} },
+              'f:workloadUpdateStrategy': { 'f:workloadUpdateMethods': {} },
+            },
+          },
+        },
+        { manager: 'Headlamp unknown (linux', operation: 'Update', fieldsType: 'FieldsV1', fieldsV1: { 'f:spec': { 'f:configuration': { 'f:cpuModel': {} } } } },
+      ],
+    },
+  });
+
+  it('reads the settings and gates k4all owns', () => {
+    expect(G.k4allKubevirt(owned(), true)).toEqual({
+      useEmulation: true,
+      vmStateStorageClass: true,
+      workloadUpdateMethods: true,
+      gatesOn: ['Sidecar'],
+      gatesOff: ['VideoConfig'],
+    });
+  });
+
+  it('owns nothing when k4all does not run the cluster', () => {
+    expect(G.k4allKubevirt(owned(), false)).toEqual({ useEmulation: false, vmStateStorageClass: false, workloadUpdateMethods: false, gatesOn: [], gatesOff: [] });
+  });
+
+  it('a v2.6 operator applying workloadUpdateStrategy: {} owns no update method (R9)', () => {
+    const k = kv([], 'v1.9.1', { spec: { workloadUpdateStrategy: { workloadUpdateMethods: ['LiveMigrate'] } } });
+    k.metadata.managedFields = [
+      { manager: 'k4all-operator', operation: 'Apply', fieldsType: 'FieldsV1', fieldsV1: { 'f:spec': { 'f:workloadUpdateStrategy': {}, 'f:customizeComponents': {} } } },
+      { manager: 'kubectl-patch', operation: 'Update', fieldsType: 'FieldsV1', fieldsV1: { 'f:spec': { 'f:workloadUpdateStrategy': { 'f:workloadUpdateMethods': {} } } } },
+    ];
+    expect(G.k4allKubevirt(k, true).workloadUpdateMethods).toBe(false);
+  });
+
+  it('marks the gate rows k4all owns, listed or not', () => {
+    const rows = G.gateRows(owned(), G.k4allKubevirt(owned(), true));
+    const row = (n: string) => [...rows.hangar, ...rows.listedOther, ...rows.other].find(r => r.name === n);
+    expect(row('Sidecar')?.k4all).toBe('on');
+    expect(row('VideoConfig')?.k4all).toBe('off');
+    expect(row('VSOCK')?.k4all).toBeUndefined();
+    expect(row('Snapshot')?.k4all).toBeUndefined();
+    // without k4all's view, no row is marked
+    expect([...G.gateRows(owned()).hangar].some(r => r.k4all)).toBe(false);
+  });
+});

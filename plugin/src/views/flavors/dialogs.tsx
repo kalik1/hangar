@@ -19,6 +19,7 @@ import Typography from '@mui/material/Typography';
 import React from 'react';
 import { HangarData } from '../../api/data';
 import { createFlavors, updateFlavor } from '../../api/flavors';
+import { useK4all } from '../../api/k4all';
 import {
   bestCommonModel,
   Family,
@@ -29,6 +30,7 @@ import {
   flavorFrom,
   flavorRequirements,
   hostCpus,
+  nodeSettingsWords,
   PURPOSES,
   SIZE_LADDER,
 } from '../../model/flavors';
@@ -39,6 +41,7 @@ import { useK8s } from '../../shell/settings';
 import { K8sName } from '../../ui/kit';
 import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
+import { K4allNodesHint } from '../settings/K4allManaged';
 import { CpuModelSelect } from './parts';
 
 const quiet = (p: Promise<unknown>) => p.catch(() => undefined);
@@ -69,6 +72,7 @@ function knobsOf(f?: Flavor): Knobs {
 
 /** The knobs block shared by both dialogs, with what each needs from the hosts. */
 function KnobFields({ k, set, d, memBytes }: { k: Knobs; set: (p: Partial<Knobs>) => void; d: HangarData; memBytes: number }) {
+  const k4all = useK4all();
   const t = useTokens();
   const k8s = useK8s();
   const gpus = mappingsOf(d.kubevirt);
@@ -136,6 +140,7 @@ function KnobFields({ k, set, d, memBytes }: { k: Knobs; set: (p: Partial<Knobs>
           No host has {unmet.map(u => u.what.charAt(0).toLowerCase() + u.what.slice(1)).join(', ')} today: VMs of this flavor will wait until one does.
         </Typography>
       )}
+      {k4all && nodeSettingsWords(unmet) && <K4allNodesHint what={nodeSettingsWords(unmet)!} />}
       <Typography sx={{ fontSize: 12.5, color: t.muted }}>Hugepage memory cannot be overcommitted, so overcommit is off with huge pages.</Typography>
     </Box>
   );

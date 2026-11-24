@@ -24,6 +24,7 @@ import { Link as RouterLink, useHistory } from 'react-router-dom';
 import * as A from '../../api/actions';
 import { HangarData, useHangar } from '../../api/data';
 import { deleteFlavors, setClusterCpuModel, useFolderFlavors } from '../../api/flavors';
+import { useK4all } from '../../api/k4all';
 import { NOT_ALLOWED, useCan } from '../../api/permissions';
 import {
   bestCommonModel,
@@ -38,6 +39,7 @@ import {
   flavorRequirements,
   hostCpus,
   modelMatrix,
+  nodeSettingsWords,
   setCpuModel,
   vendors,
   vmsUsing,
@@ -51,6 +53,7 @@ import { confirm, openDialog } from '../../ui/dialogs';
 import { IconAction, K8sName, Panel, Tag } from '../../ui/kit';
 import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
+import { K4allNodesHint } from '../settings/K4allManaged';
 import { FlavorDialog, NewFamilyDialog } from './dialogs';
 import { CpuModelSelect, TONE } from './parts';
 
@@ -148,6 +151,7 @@ function extras(f: Flavor): React.ReactNode[] {
 }
 
 function VmFlavors({ d, fams }: { d: HangarData; fams: Family[] }) {
+  const k4all = useK4all();
   const t = useTokens();
   const k8s = useK8s();
   const [q, setQ] = React.useState('');
@@ -246,6 +250,7 @@ function VmFlavors({ d, fams }: { d: HangarData; fams: Family[] }) {
                   {u.hosts.length ? `${u.what}: on ${u.hosts.join(', ')} only.` : `${u.what}: no host has it, these VMs cannot start here.`}
                 </Box>
               ))}
+              {k4all && nodeSettingsWords(unmet) && <K4allNodesHint what={nodeSettingsWords(unmet)!} sx={{ display: 'block', mt: 0.5 }} />}
             </Box>
             <Box
               component="table"

@@ -166,8 +166,10 @@ history keeps growing, the tasks keep being followed.
   mapping of identical devices or creates one), **Give back to host**,
   **Offer to VMs** for USB devices and vGPU profiles, **Give to a VM** for
   free disks, **Take back**, **Reload devices**. Banners say when the
-  IOMMU is off, when KubeVirt's passthrough gate is off, and when devices
-  were prepared after KubeVirt's agent started (so VMs may not get them).
+  IOMMU is off (on k4all with a link to the addon's node settings,
+  `/k4all/settings/nodes`, which adds the kernel arguments), when KubeVirt's
+  passthrough gate is off, and when devices were prepared after KubeVirt's
+  agent started (so VMs may not get them).
 - **Device mappings** (from Hosts): what VMs can ask for, Proxmox's
   resource mappings: name, kind (GPU, PCI device, vGPU profile, USB
   device), what it matches, free of total per host, the VMs asking for
@@ -229,7 +231,9 @@ history keeps growing, the tasks keep being followed.
     functions, Real time, and Hangar's own), each size with vCPU, memory,
     CPU model, extras (dedicated CPUs, huge pages, NUMA, overcommit, GPU),
     the hosts that can run it (CPU manager, huge pages, CPU model, device
-    resources from the node) and the VMs using it. KubeVirt's flavors are
+    resources from the node; on k4all a missing CPU manager or huge pages
+    links to the addon's node settings, `/k4all/settings/nodes`) and the
+    VMs using it. KubeVirt's flavors are
     read-only ("Make a custom copy"); Hangar's (label
     `hangar.magesgate.com/flavor-family`, cluster-wide or one folder) are
     created as a ladder of sizes from a purpose and a memory-per-vCPU
@@ -274,8 +278,18 @@ history keeps growing, the tasks keep being followed.
     Hangar reads the resource fresh and merge-patches only the
     featureGates list with its resourceVersion (retry on conflict), and
     never writes HotplugVolumes with DeclarativeHotplugVolumes. On k4all
-    (its API group is served) the page says k4all will manage these from
-    its KubeVirt addon in a coming release.
+    (its API group is served) the gates k4all's ClusterConfig turns on or
+    off (the annotations `k4all.magesgate.com/feature-gates` and
+    `k4all.magesgate.com/disabled-feature-gates` on the KubeVirt resource:
+    the lists have a single manager) are read-only, "Managed by k4all —
+    change it in the k4all addon", linked to
+    `/k4all/settings/virtualization#feature-gates`; the others Hangar turns
+    on and off as before, and k4all keeps them (it removes only its own).
+    What k4all's operator applies (`model/ownership.ts`, managedFields,
+    manager exactly `k4all-operator`) is read-only too: the VM state
+    datastore and software emulation (links to the addon), the release's
+    update methods ("set by the k4all release"). cpuModel, evictionStrategy,
+    vmRolloutStrategy and the device mappings stay Hangar's.
   - *Delete protection*: whether the policy and its binding are installed
     (GET on both; "cannot tell" without the right to read them), how to
     install it, the protected VMs.
@@ -406,6 +420,7 @@ plugin/
   src/model/                 pure logic with unit tests: vm, vmspec, edit, vmoptions
                              (options, devices, CPU, disk settings, shares, hot-add),
                              gates (feature gate table), protection, tasks, units,
+                             ownership (k4all's fields, shared with Cairn),
                              hardware (inventory, mappings, passthrough edits),
                              inventory, capacity, alarms, ...
   src/ui/                    tokens, LED, kit (panels, meters, …), DataTable, dialogs
