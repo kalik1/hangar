@@ -22,7 +22,7 @@ names, related objects, YAML).
 | Options | Delete protection, start paused, guest clock (UTC, time zone, offset), tablet pointer, ACPI, SMBIOS (UUID, serial, chassis), guest OS tuning; machine type (the versions the hosts offer and KubeVirt accepts) |
 | Networking | The NAT range of pod-network adapters (vmNetworkCIDR) avoids the cluster's pod, service and host ranges (a VM on a host whose pods use 10.0.2.0/24 could not reach them); Configure fixes existing VMs |
 | Settings | KubeVirt's features (feature gates) in plain words: on or off, maturity per KubeVirt version, what each unlocks, the cluster settings they need; turn them on and off; the delete protection policy |
-| Copies | Clone, clone to template, new VM from template (disks copied, new MACs and hostname) |
+| Copies | Clone, clone to template, new VM from template (disks copied, new hostname, new fixed MAC on NAT adapters) |
 | Snapshots | Take, revert, delete |
 | Hosts | State, hardware, usage, VMs; maintenance mode with live evacuation |
 | Migration | Live migration to a chosen host or the cluster's choice, with the reason when a VM cannot move |

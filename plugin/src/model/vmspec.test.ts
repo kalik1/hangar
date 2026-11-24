@@ -1,4 +1,7 @@
-import { buildVm, cloudInitUserData, copyVm, nameProblem, slugify, withHostname,WizardInput } from './vmspec';
+import { addNic } from './edit';
+import { buildVm, cloudInitUserData, copyVm, localMac, nameProblem, slugify, withHostname, WizardInput } from './vmspec';
+
+const LOCAL_MAC = /^02(:[0-9a-f]{2}){5}$/;
 
 const base: WizardInput = {
   name: 'web-03',
@@ -39,8 +42,21 @@ describe('buildVm', () => {
     expect(t.domain.cpu).toEqual({ sockets: 1, cores: 2, threads: 1 });
     expect(t.domain.memory).toEqual({ guest: '2Gi' });
     expect(t.networks).toEqual([{ name: 'default', pod: {} }]);
-    expect(t.domain.devices.interfaces).toEqual([{ name: 'default', masquerade: {}, model: 'virtio' }]);
+    expect(t.domain.devices.interfaces).toEqual([{ name: 'default', masquerade: {}, model: 'virtio', macAddress: expect.stringMatching(LOCAL_MAC) }]);
     expect(t.volumes.find((v: any) => v.name === 'cloudinitdisk').cloudInitNoCloud.userData).toContain('hostname: web-03');
+  });
+  it('gives NAT adapters a fixed MAC (the wizard’s, else a new one) and leaves bridged ones to the network', () => {
+    const vm = buildVm({
+      ...base,
+      nics: [
+        { name: 'default', network: '', model: 'virtio', mac: '02:12:34:56:78:9a' },
+        { name: 'lan', network: 'prod/vlan', model: 'virtio', mac: '02:00:00:00:00:01' },
+      ],
+    });
+    const [nat, lan] = vm.spec.template.spec.domain.devices.interfaces;
+    expect(nat.macAddress).toBe('02:12:34:56:78:9a');
+    expect(lan.macAddress).toBeUndefined();
+    expect(buildVm(base).spec.template.spec.domain.devices.interfaces[0].macAddress).toMatch(LOCAL_MAC);
   });
   it('installs from an ISO: blank system disk, CD/DVD first, no cloud-init', () => {
     const vm = buildVm({ ...base, source: { kind: 'iso', namespace: 'lib', name: 'alpine' }, cloudInit: { user: 'x' } });
@@ -120,12 +136,42 @@ describe('copyVm', () => {
     ]);
     const t = vm.spec.template.spec;
     expect(t.volumes[0]).toEqual({ name: 'rootdisk', dataVolume: { name: 'web-04-rootdisk' } });
-    expect(t.domain.devices.interfaces[0].macAddress).toBeUndefined();
+    expect(t.domain.devices.interfaces[0].macAddress).toMatch(LOCAL_MAC);
     expect(t.domain.firmware).toEqual({});
     expect(t.volumes[1].cloudInitNoCloud.userData).toContain('hostname: web-04');
     expect(vm.spec.template.metadata.labels['kubevirt.io/domain']).toBeUndefined();
     expect(vm.spec.runStrategy).toBe('Always');
     expect(vm.metadata.annotations['hangar.magesgate.com/copied-from']).toBe('demo/tpl-fedora');
+  });
+  it('gives NAT adapters a new fixed MAC and drops bridged and SR-IOV ones', () => {
+    const nics = {
+      ...src,
+      spec: {
+        ...src.spec,
+        template: {
+          ...src.spec.template,
+          spec: {
+            ...src.spec.template.spec,
+            domain: {
+              devices: {
+                interfaces: [
+                  { name: 'default', masquerade: {}, macAddress: '02:12:34:56:78:9a' },
+                  { name: 'lan', bridge: {}, macAddress: '52:54:00:12:34:56' },
+                  { name: 'fast', sriov: {}, macAddress: '52:54:00:ab:cd:ef' },
+                ],
+              },
+            },
+          },
+        },
+      },
+    };
+    const a = copyVm(nics, { name: 'web-05', namespace: 'prod', runStrategy: 'Always', pvcs }).spec.template.spec.domain.devices.interfaces;
+    const b = copyVm(nics, { name: 'web-06', namespace: 'prod', runStrategy: 'Always', pvcs }).spec.template.spec.domain.devices.interfaces;
+    expect(a[0].macAddress).toMatch(LOCAL_MAC);
+    expect(a[0].macAddress).not.toBe('02:12:34:56:78:9a');
+    expect(b[0].macAddress).not.toBe(a[0].macAddress);
+    expect(a[1].macAddress).toBeUndefined();
+    expect(a[2].macAddress).toBeUndefined();
   });
   it('keeps the template mark when cloning to a template', () => {
     const vm = copyVm(src, { name: 'tpl-2', namespace: 'demo', runStrategy: 'Halted', pvcs, asTemplate: true });
@@ -165,5 +211,20 @@ describe('buildVm template annotations', () => {
     const vm = buildVm({ ...base, templateAnnotations: { 'hooks.kubevirt.io/hookSidecars': '[]' } });
     expect(vm.spec.template.metadata.annotations).toEqual({ 'hooks.kubevirt.io/hookSidecars': '[]' });
     expect(buildVm(base).spec.template.metadata.annotations).toBeUndefined();
+  });
+});
+
+describe('localMac', () => {
+  it('is a locally administered unicast address', () => {
+    expect(localMac(() => new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x01]))).toBe('02:de:ad:be:ef:01');
+    expect(localMac()).toMatch(LOCAL_MAC);
+    expect(localMac()).not.toBe(localMac());
+  });
+  it('is what a new NAT adapter gets; bridged ones get none', () => {
+    const vm = buildVm({ ...base, nics: [{ name: 'lan', network: 'prod/vlan', model: 'virtio' }] });
+    const nat = addNic(vm, '', 'virtio');
+    expect(nat.vm.spec.template.spec.domain.devices.interfaces.find((i: any) => i.name === nat.name).macAddress).toMatch(LOCAL_MAC);
+    const br = addNic(vm, 'prod/vlan2', 'virtio');
+    expect(br.vm.spec.template.spec.domain.devices.interfaces.find((i: any) => i.name === br.name).macAddress).toBeUndefined();
   });
 });

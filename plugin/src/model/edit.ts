@@ -8,6 +8,7 @@
 
 import { VM } from './types';
 import { toQuantity } from './units';
+import { localMac } from './vmspec';
 
 export const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 
@@ -231,7 +232,7 @@ export function addNic(vm: VM, network: string, model: string): { vm: VM; name: 
   const t = tpl(out);
   const names = [...(t.domain.devices.interfaces ?? []).map((i: any) => i.name), ...(t.networks ?? []).map((n: any) => n.name)];
   const name = uniqueName(names, network ? 'nic' : 'default');
-  const iface = network ? { name, bridge: {}, model } : { name, masquerade: {}, model };
+  const iface = network ? { name, bridge: {}, model } : { name, masquerade: {}, model, macAddress: localMac() };
   t.domain.devices.interfaces = [...(t.domain.devices.interfaces ?? []), iface];
   t.networks = [...(t.networks ?? []), network ? { name, multus: { networkName: network } } : { name, pod: {} }];
   return { vm: out, name };

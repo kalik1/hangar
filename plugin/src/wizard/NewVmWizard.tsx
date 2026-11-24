@@ -38,7 +38,7 @@ import { preferredDatastore } from '../model/placement';
 import { cidrConflicts, DEFAULT_VM_CIDR, freeVmCidr } from '../model/podnet';
 import { formatBytes, GiB, MiB, parseQuantity } from '../model/units';
 import { RUN_STRATEGIES } from '../model/vm';
-import { BootSource, buildVm, nameProblem, WizardDisk, WizardInput, WizardNic } from '../model/vmspec';
+import { BootSource, buildVm, localMac, nameProblem, WizardDisk, WizardInput, WizardNic } from '../model/vmspec';
 import { hrefFor } from '../shell/nav';
 import { useK8s, useSettings } from '../shell/settings';
 import { K8sName,KV } from '../ui/kit';
@@ -253,7 +253,7 @@ function initialState(d: HangarData, preset: WizardPreset, libraryNs: string): S
     datastore: def?.name ?? '',
     bus: 'virtio',
     extraDisks: [],
-    nics: [{ name: 'default', network: '', model: 'virtio' }],
+    nics: [{ name: 'default', network: '', model: 'virtio', mac: localMac() }],
     dns: { policy: 'ClusterFirst', nameservers: [], searches: [] },
     dnsOpen: false,
     clipboard: false,
@@ -755,7 +755,7 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
                   disabled={!nads.length && s.nics.some(x => !x.network)}
                   onClick={() => {
                     const free = nads.find(x => !s.nics.some(y => y.network === `${x.metadata.namespace}/${x.metadata.name}`));
-                    set({ nics: [...s.nics, { name: `nic${s.nics.length}`, network: free ? `${free.metadata.namespace}/${free.metadata.name}` : '', model: 'virtio' }] });
+                    set({ nics: [...s.nics, { name: `nic${s.nics.length}`, network: free ? `${free.metadata.namespace}/${free.metadata.name}` : '', model: 'virtio', mac: localMac() }] });
                   }}
                   sx={{ textTransform: 'none' }}
                 >

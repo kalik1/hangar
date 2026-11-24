@@ -149,8 +149,9 @@ history keeps growing, the tasks keep being followed.
   customization (form or own cloud-config), review with power policy and
   maintenance behaviour, Create (or Review YAML).
 - **Clone, clone to template, new VM from template**: every persistent disk
-  is copied with CDI; the copy gets new MAC addresses, a new firmware UUID
-  and serial, and its own hostname in cloud-init.
+  is copied with CDI; the copy gets a new fixed MAC on its NAT adapters
+  (none on the others), a new firmware UUID and serial, and its own
+  hostname in cloud-init.
 - **Hosts**: list with state, VMs, CPU and memory usage, hardware; host
   page with resources (used and allocated), its VMs and whether each can
   move live, usage charts, events, **Enter/Exit maintenance mode**.
@@ -430,6 +431,15 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
 - Clones copy disks with CDI DataVolumes (`source.pvc`), not the
   VirtualMachineClone API, which needs volume snapshots. The source must be
   off for a consistent copy (CDI also refuses a PVC in use).
+- NAT (masquerade) adapters get a fixed MAC when Hangar makes them (wizard,
+  clone, Add adapter): `02:` (locally administered, unicast) and five random
+  bytes, new for each copy. Without `macAddress` KubeVirt draws a new MAC at
+  every start, and a Linux guest on a persistent disk then sees a new NIC
+  and can lose its network settings. Only NAT adapters: their MAC lives on
+  the private link between the guest and its own pod, so it never meets
+  another VM's. Bridged and SR-IOV adapters sit on a real network, where a
+  MAC picked at random could collide and is the user's (or the network
+  team's) call: Hangar leaves it unset and a clone drops the source's.
 - ISOs are copied per VM (a DataVolume cloned from the library), so any
   host can mount them and nothing is shared across hosts.
 - The library namespace is shared with every folder through a Role on

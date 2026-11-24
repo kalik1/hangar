@@ -56,10 +56,30 @@ export interface CopyOptions {
   storageClass?: string;
 }
 
+const randomBytes = (n: number): Uint8Array => {
+  const b = new Uint8Array(n);
+  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(b);
+  else for (let i = 0; i < n; i++) b[i] = Math.floor(Math.random() * 256);
+  return b;
+};
+
+/**
+ * A MAC address for a NAT (masquerade) adapter: 02 (locally administered,
+ * unicast) and five random bytes. Without one KubeVirt draws a new MAC at
+ * every start, and a Linux guest on a persistent disk then sees a new NIC and
+ * may lose its network settings. Only NAT adapters get one: their MAC exists
+ * only on the private link between the guest and its pod, so it can never
+ * meet another VM's; bridged and SR-IOV adapters sit on a real network,
+ * where the MAC is the user's (or the network's) call. DESIGN.md §6.
+ */
+export function localMac(bytes: (n: number) => Uint8Array = randomBytes): string {
+  return ['02', ...Array.from(bytes(5).slice(0, 5), b => b.toString(16).padStart(2, '0'))].join(':');
+}
+
 /**
  * A new VM that copies `src`: same hardware and settings, each persistent
- * disk cloned. MAC addresses, firmware UUID and serial are dropped so the
- * copy gets its own.
+ * disk cloned. Firmware UUID and serial are dropped so the copy gets its
+ * own; NAT adapters get a new fixed MAC (localMac), the others none.
  */
 export function copyVm(src: VM, o: CopyOptions): VM {
   const spec = clone(src.spec ?? {});
@@ -102,7 +122,10 @@ export function copyVm(src: VM, o: CopyOptions): VM {
     if (ci?.userData) ci.userData = withHostname(ci.userData, o.name);
   }
   const ifaces: any[] = tpl.spec?.domain?.devices?.interfaces ?? [];
-  for (const i of ifaces) delete i.macAddress;
+  for (const i of ifaces) {
+    if (i.masquerade) i.macAddress = localMac();
+    else delete i.macAddress;
+  }
   if (tpl.spec?.domain?.firmware) {
     delete tpl.spec.domain.firmware.uuid;
     delete tpl.spec.domain.firmware.serial;
@@ -149,10 +172,15 @@ export interface WizardDisk {
 
 export interface WizardNic {
   name: string;
-  /** "" for the pod network, else "namespace/name" of a network attachment. */
+  /** "" for the pod network (NAT), else "namespace/name" of a network attachment (bridge). */
   network: string;
   model: 'virtio' | 'e1000e';
-  /** Pod network: NAT; attachments: bridge. */
+  /**
+   * The NAT adapter's MAC, kept in the wizard's state so the YAML review
+   * shows what Create makes; default a new localMac(). Ignored for
+   * attachments.
+   */
+  mac?: string;
 }
 
 export interface WizardInput {
@@ -271,7 +299,7 @@ export function buildVm(w: WizardInput): VM {
   w.nics.forEach((n, i) => {
     const name = n.name || (i === 0 ? 'default' : `nic${i}`);
     if (!n.network) {
-      interfaces.push({ name, masquerade: {}, model: n.model });
+      interfaces.push({ name, masquerade: {}, model: n.model, macAddress: n.mac || localMac() });
       networks.push({ name, pod: w.vmNetworkCidr ? { vmNetworkCIDR: w.vmNetworkCidr } : {} });
     } else {
       interfaces.push({ name, bridge: {}, model: n.model });
