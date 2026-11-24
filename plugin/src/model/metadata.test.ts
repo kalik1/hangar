@@ -4,7 +4,7 @@ import {
   L_METADATA,
   L_SERVICE_ACCOUNT,
   metadataChoice,
-  metadataEvent,
+  metadataEvents,
   metadataService,
   metadataVerdict,
   serviceAccountProblem,
@@ -152,20 +152,45 @@ describe('whether a VM gets the metadata service, and why not', () => {
     expect(v.why).toMatch(/pod network/);
   });
 
-  it('shows the reason k4all gives in an Event on the VM', () => {
-    const evs = [event('MetadataSkipped', 'namespace demo enforces PodSecurity baseline: no metadata injection', 'Warning', 'k4all-operator', '2026-11-24T10:00:00Z')];
-    const v = metadataVerdict({ vm: vm(ON), namespace: ns(), service: svc, events: evs });
+  it('says the VM is not served when k4all says so and Hangar cannot read the folder', () => {
+    const evs = [event('MetadataNotServed', 'namespace demo enforces PodSecurity "baseline", which forbids the NET_ADMIN capability')];
+    const v = metadataVerdict({ vm: vm(ON), service: svc, events: evs });
     expect(v.state).toBe('skipped');
-    expect(v.why).toBe('k4all: namespace demo enforces PodSecurity baseline: no metadata injection');
+    expect(v.why).toBe('k4all: namespace demo enforces PodSecurity "baseline", which forbids the NET_ADMIN capability');
+    // with the folder in hand its labels are current, the Event may be an hour old
+    expect(metadataVerdict({ vm: vm(ON), namespace: ns(), service: svc, events: evs }).state).toBe('on');
     // other components' events, other reasons and other objects do not count
-    const other = [event('MetadataSkipped', 'x', 'Warning', 'virt-controller'), event('FailedCreate', 'x'), { ...event('MetadataSkipped', 'x'), involvedObject: { kind: 'VirtualMachine', name: 'db', namespace: 'demo' } }];
-    expect(metadataVerdict({ vm: vm(ON), namespace: ns(), service: svc, events: other }).state).toBe('on');
+    const other = [event('MetadataNotServed', 'x', 'Warning', 'virt-controller'), event('FailedCreate', 'x'), { ...event('MetadataNotServed', 'x'), involvedObject: { kind: 'VirtualMachine', name: 'db', namespace: 'demo' } }];
+    expect(metadataVerdict({ vm: vm(ON), service: svc, events: other }).state).toBe('on');
   });
 
-  it('picks the newest k4all metadata event of the VM', () => {
-    const evs = [event('MetadataSkipped', 'old', 'Warning', 'k4all-operator', '2026-11-24T09:00:00Z'), event('MetadataInjected', 'served', 'Normal', 'k4all-operator', '2026-11-24T10:00:00Z')];
-    expect(metadataEvent(evs, vm(ON))?.message).toBe('served');
-    expect(metadataVerdict({ vm: vm(ON), namespace: ns(), service: svc, events: evs }).state).toBe('on');
+  it('keeps a served VM served when k4all warns about what it serves', () => {
+    const evs = [
+      event('MetadataIncomplete', 'the metadata service serves this VM without what is missing: Secret web-ci not found'),
+      event('MetadataSecretTaken', 'Secret k4all-md-web exists and is not k4all’s'),
+    ];
+    const v = metadataVerdict({ vm: vm(ON), namespace: ns(), service: svc, events: evs });
+    expect(v.state).toBe('on');
+    expect(v.notes).toEqual(['k4all: the metadata service serves this VM without what is missing: Secret web-ci not found', 'k4all: Secret k4all-md-web exists and is not k4all’s']);
+  });
+
+  it('leaves the asset tag to the VM spec: k4all’s Event outlives a fix', () => {
+    const evs = [event('MetadataChassisAsset', 'the VM’s chassis asset tag is "Rack 12"')];
+    const fixed = metadataVerdict({ vm: vm(ON), namespace: ns(), service: svc, events: evs });
+    expect(fixed.state).toBe('on');
+    expect(fixed.notes).toEqual([]);
+    const tagged = metadataVerdict({ vm: vm(ON, { domain: { chassis: { asset: 'Rack 12' } } }), namespace: ns(), service: svc, events: evs });
+    expect(tagged.notes).toHaveLength(1);
+    expect(tagged.notes[0]).toMatch(/OpenStack datasource/);
+  });
+
+  it('keeps the newest k4all metadata event of each reason', () => {
+    const evs = [
+      event('MetadataIncomplete', 'old', 'Warning', 'k4all-operator', '2026-11-24T09:00:00Z'),
+      event('MetadataIncomplete', 'new', 'Warning', 'k4all-operator', '2026-11-24T10:00:00Z'),
+      event('MetadataSecretTaken', 'taken', 'Warning', 'k4all-operator', '2026-11-24T09:30:00Z'),
+    ];
+    expect(metadataEvents(evs, vm(ON)).map(e => e.message)).toEqual(['new', 'taken']);
   });
 
   it('warns when the chosen ServiceAccount does not exist', () => {

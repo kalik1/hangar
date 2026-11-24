@@ -17,8 +17,10 @@
  * The policy is not injected where it cannot work: VMs without a pod network
  * (NAT) adapter, and namespaces whose PodSecurity enforces baseline or
  * restricted (its redirect needs NET_ADMIN; those VMs keep their cloud-init
- * disk, D8). When k4all skips a labelled VM it says so in an Event on the
- * VM (reason starting with "Metadata", from a k4all component).
+ * disk, D8). k4all also writes Warning Events on the VM (reason
+ * Metadata…, from a k4all component): MetadataNotServed (PodSecurity),
+ * MetadataIncomplete and MetadataSecretTaken (served, short of something),
+ * MetadataChassisAsset (a tag of the user's).
  */
 
 import { Obj } from './types';
@@ -132,20 +134,34 @@ export function chassisAssetWarning(asset: string | undefined, vm: Obj, service:
 
 const evTime = (e: Obj) => e.lastTimestamp ?? e.eventTime ?? e.series?.lastObservedTime ?? e.metadata?.creationTimestamp ?? '';
 
-/** The newest Event k4all wrote on the VM about its metadata service. */
-export function metadataEvent(events: Obj[], vm: Obj): Obj | undefined {
+/**
+ * k4all's Warning Events on a VM about its metadata service (reason
+ * Metadata…), the newest of each reason, newest first. k4all writes them
+ * when something changes and never clears them: they fade with the Event
+ * TTL (an hour by default), so one can outlive the fix.
+ */
+export function metadataEvents(events: Obj[], vm: Obj): Obj[] {
   const from = (e: Obj) => String(e.reportingController ?? e.reportingComponent ?? e.source?.component ?? '');
-  return events
-    .filter(
-      e =>
-        e.involvedObject?.kind === 'VirtualMachine' &&
-        e.involvedObject?.name === vm.metadata.name &&
-        (e.involvedObject?.namespace ?? e.metadata?.namespace) === vm.metadata.namespace &&
-        /^Metadata/.test(String(e.reason ?? '')) &&
-        from(e).includes('k4all')
+  const newest = new Map<string, Obj>();
+  for (const e of events) {
+    if (
+      e.involvedObject?.kind !== 'VirtualMachine' ||
+      e.involvedObject?.name !== vm.metadata.name ||
+      (e.involvedObject?.namespace ?? e.metadata?.namespace) !== vm.metadata.namespace ||
+      !/^Metadata/.test(String(e.reason ?? '')) ||
+      !from(e).includes('k4all')
     )
-    .sort((a, b) => evTime(b).localeCompare(evTime(a)))[0];
+      continue;
+    const seen = newest.get(e.reason);
+    if (!seen || evTime(e).localeCompare(evTime(seen)) > 0) newest.set(e.reason, e);
+  }
+  return [...newest.values()].sort((a, b) => evTime(b).localeCompare(evTime(a)));
 }
+
+/** k4all does not inject the service (PodSecurity, D8). */
+const EV_NOT_SERVED = 'MetadataNotServed';
+/** A chassis asset tag of the user's: Hangar reads it from the spec instead (chassisAssetWarning). */
+const EV_CHASSIS_ASSET = 'MetadataChassisAsset';
 
 export type MetadataState = 'on' | 'off' | 'not-asked' | 'skipped' | 'unknown';
 
@@ -205,15 +221,18 @@ export function metadataVerdict(i: MetadataInput): MetadataVerdict {
       why: `Folder ${vm.metadata.namespace} enforces PodSecurity ${level}, which forbids what the service needs (NET_ADMIN): k4all does not inject it there, and the VM keeps its cloud-init disk.`,
     };
   }
-  const ev = metadataEvent(i.events, vm);
-  if (ev?.type === 'Warning') return { ...base, state: 'skipped', why: `k4all: ${ev.message ?? ev.reason}` };
+  const evs = metadataEvents(i.events, vm).filter(e => e.type === 'Warning' && e.reason !== EV_CHASSIS_ASSET);
+  const say = (e: Obj) => `k4all: ${e.message ?? e.reason}`;
+  // With the folder in hand its PodSecurity labels (above) are current; the Event may be stale.
+  const notServed = !i.namespace && evs.find(e => e.reason === EV_NOT_SERVED);
+  if (notServed) return { ...base, state: 'skipped', why: say(notServed) };
   const audiences = service.audiences.length ? service.audiences : [DEFAULT_AUDIENCE];
   const serves = [
     `instance-id ${vm.metadata.uid ?? '(the VM’s UID)'} (the VM’s UID)`,
     'hostname, SSH keys and user-data from the VM’s cloud-init settings',
     `tokens for ${audiences.join(', ')} as ServiceAccount ${sa}`,
   ];
-  const notes: string[] = [];
+  const notes: string[] = evs.filter(e => e.reason !== EV_NOT_SERVED).map(say);
   const tagWarning = chassisAssetWarning(vm.spec?.template?.spec?.domain?.chassis?.asset, vm, service);
   if (tagWarning) notes.push(tagWarning);
   if (i.serviceAccounts && !i.serviceAccounts.includes(sa)) notes.push(`ServiceAccount ${sa} does not exist in ${vm.metadata.namespace}: the VM cannot start until it does.`);

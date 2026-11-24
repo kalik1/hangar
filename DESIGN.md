@@ -161,8 +161,12 @@ history keeps growing, the tasks keep being followed.
   it serves (instance-id = the VM's UID, cloud-init data, tokens) and why
   not (service off, not asked or opted out with
   `k4all.magesgate.com/metadata: disabled` under scope All, no pod network
-  adapter, PodSecurity, or the Event k4all writes on the VM: reason
-  `Metadata…` from a k4all component). k4all sets the asset tag on the VMs
+  adapter, PodSecurity). k4all's Warning Events on the VM (reason
+  `Metadata…` from a k4all component) become notes; `MetadataNotServed`
+  marks the VM not served only when Hangar cannot read the folder, whose
+  labels are fresher than an Event (k4all never clears them, they fade
+  with the Event TTL), and `MetadataChassisAsset` is left to the spec
+  check below. k4all sets the asset tag on the VMs
   it serves when they have none; a tag of the user's wins, and then
   cloud-init never looks for the service: the summary and the SMBIOS row
   and dialog say so for VMs that get the service.
