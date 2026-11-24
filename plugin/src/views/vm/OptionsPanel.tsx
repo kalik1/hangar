@@ -22,8 +22,10 @@ import React from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { useHangar } from '../../api/data';
 import { useFolderFlavors } from '../../api/flavors';
+import { useK4allMetadata } from '../../api/k4all';
 import { NOT_ALLOWED, useVmPerms } from '../../api/permissions';
 import { setVmProtection, useProtectionPolicy } from '../../api/protection';
+import { chassisAssetWarning } from '../../model/metadata';
 import { isProtected, PROTECTED_LABEL } from '../../model/protection';
 import { Obj } from '../../model/types';
 import { formatBytes, parseQuantity } from '../../model/units';
@@ -145,6 +147,8 @@ function SmbiosDialog({ vm, onClose }: { vm: Obj; onClose: () => void }) {
   const cluster = d.kubevirt?.spec?.configuration?.smbios ?? {};
   const uuidBad = !!s.uuid.trim() && !O.UUID_RE.test(s.uuid.trim());
   const running = !!d.idx.vmi.get(key(vm));
+  const k4 = useK4allMetadata();
+  const assetWarning = k4.on ? chassisAssetWarning(s.chassis.asset, vm, k4.metadata) : null;
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth aria-labelledby="hangar-smbios-title">
       <DialogTitle id="hangar-smbios-title" sx={{ fontSize: 18 }}>
@@ -174,6 +178,11 @@ function SmbiosDialog({ vm, onClose }: { vm: Obj; onClose: () => void }) {
             <TextField key={f.key} size="small" label={f.label} value={s.chassis[f.key]} onChange={e => setS({ ...s, chassis: { ...s.chassis, [f.key]: e.target.value } })} />
           ))}
         </Box>
+        {assetWarning && (
+          <Typography role="status" sx={{ fontSize: 13, color: '#B7791F' }}>
+            {assetWarning}
+          </Typography>
+        )}
         <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>
           Manufacturer, product, version and family of the system are the same for every VM of this datacenter
           {cluster.manufacturer || cluster.product ? ` (${[cluster.manufacturer, cluster.product, cluster.version].filter(Boolean).join(', ')})` : ' (KubeVirt’s defaults)'}: they are set in the KubeVirt resource (spec.configuration.smbios).
@@ -290,6 +299,7 @@ export function OptionsPanel({ vm }: { vm: Obj }) {
   const t = useTokens();
   const k8s = useK8s();
   const folder = useFolderFlavors();
+  const k4 = useK4allMetadata();
   const vmi = d.idx.vmi.get(key(vm));
   const running = powerState(vm, vmi).kind !== 'off';
   const hw = hardware(vm, vmi, d.instancetypes);
@@ -314,6 +324,7 @@ export function OptionsPanel({ vm }: { vm: Obj }) {
     }
     quiet(saveVm(vm, on ? 'Turn ACPI on' : 'Turn ACPI off', O.setAcpi(vm, on)));
   };
+  const assetWarning = k4.on ? chassisAssetWarning(smb.chassis.asset, vm, k4.metadata) : null;
   const smbText = [smb.uuid && `UUID ${smb.uuid}`, smb.serial && `serial ${smb.serial}`, ...O.CHASSIS_FIELDS.filter(f => smb.chassis[f.key]).map(f => `${f.label.toLowerCase()} ${smb.chassis[f.key]}`)].filter(Boolean).join(', ');
   return (
     <Panel title="Options" icon="mdi:cog-outline" actions={<Later running={running} />}>
@@ -341,6 +352,7 @@ export function OptionsPanel({ vm }: { vm: Obj }) {
       </Row>
       <Row label="SMBIOS" action={<IconAction icon="mdi:pencil-outline" label="Edit SMBIOS" onClick={() => openDialog(close => <SmbiosDialog vm={vm} onClose={close} />)} />}>
         <Box sx={{ overflowWrap: 'anywhere' }}>{smbText || 'KubeVirt defaults'}</Box>
+        {assetWarning && <Box sx={{ fontSize: 12.5, color: '#B7791F', mt: 0.5 }}>{assetWarning}</Box>}
       </Row>
       <Row label="Guest OS tuning">
         <TextField

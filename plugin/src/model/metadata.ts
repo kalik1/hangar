@@ -25,6 +25,8 @@ import { Obj } from './types';
 
 export const L_METADATA = 'k4all.magesgate.com/metadata';
 export const METADATA_ENABLED = 'enabled';
+/** With scope All, the label value that keeps a VM out of the service. */
+export const METADATA_DISABLED = 'disabled';
 export const L_SERVICE_ACCOUNT = 'k4all.magesgate.com/service-account';
 /** The chassis asset tag that makes cloud-init's ds-identify look for an OpenStack metadata service. */
 export const CHASSIS_ASSET = 'OpenStack Nova';
@@ -101,6 +103,33 @@ const tplLabels = (vm: Obj): Record<string, string> => vm.spec?.template?.metada
 /** The VM template asks for the service. */
 export const asksForMetadata = (vm: Obj) => tplLabels(vm)[L_METADATA] === METADATA_ENABLED;
 
+/** The VM template opts out of a scope All service. */
+const optsOut = (vm: Obj) => tplLabels(vm)[L_METADATA] === METADATA_DISABLED;
+
+/**
+ * Whether k4all's service is meant for the VM: on, and the VM asks for it
+ * (scope Labelled) or does not opt out (scope All). When Hangar cannot read
+ * k4all's settings, only a VM that asks counts. Where the service cannot
+ * reach the VM (no NAT adapter, PodSecurity) is metadataVerdict's business.
+ */
+export function usesMetadata(vm: Obj, service: MetadataService | null | 'unknown' | undefined): boolean {
+  if (service === 'unknown') return asksForMetadata(vm);
+  if (!service?.enabled) return false;
+  return service.scope === 'All' ? !optsOut(vm) : asksForMetadata(vm);
+}
+
+/**
+ * A chassis asset tag of the user's on a VM that uses the service: cloud-init
+ * looks for an OpenStack metadata service only when the tag is "OpenStack
+ * Nova" (k4all sets it when the VM has none), so with any other tag the guest
+ * never asks. null when the tag is fine.
+ */
+export function chassisAssetWarning(asset: string | undefined, vm: Obj, service: MetadataService | null | 'unknown' | undefined): string | null {
+  const tag = (asset ?? '').trim();
+  if (!tag || tag === CHASSIS_ASSET || !usesMetadata(vm, service)) return null;
+  return `This VM gets k4all's metadata service, but with the asset tag "${tag}" cloud-init in the guest does not find the OpenStack datasource: it looks for one only when the tag is "${CHASSIS_ASSET}". Leave the tag empty (k4all sets it) or use "${CHASSIS_ASSET}".`;
+}
+
 const evTime = (e: Obj) => e.lastTimestamp ?? e.eventTime ?? e.series?.lastObservedTime ?? e.metadata?.creationTimestamp ?? '';
 
 /** The newest Event k4all wrote on the VM about its metadata service. */
@@ -162,6 +191,7 @@ export function metadataVerdict(i: MetadataInput): MetadataVerdict {
   if (!service?.enabled)
     return { ...base, state: 'off', why: `k4all's metadata service is off in this datacenter${asked ? ': the VM asks for it and gets it once it is turned on' : ''}.` };
   if (service.scope === 'Labelled' && !asked) return { ...base, state: 'not-asked', why: `The VM does not ask for it (no ${L_METADATA}: ${METADATA_ENABLED} label on its template).` };
+  if (service.scope === 'All' && optsOut(vm)) return { ...base, state: 'not-asked', why: `The VM opts out of it (label ${L_METADATA}: ${METADATA_DISABLED} on its template).` };
   const ifaces: any[] = vm.spec?.template?.spec?.domain?.devices?.interfaces ?? [];
   if (ifaces.length && !ifaces.some(x => x?.masquerade))
     return { ...base, state: 'skipped', why: 'It has no pod network (NAT) adapter: the service is reached through the pod network only.' };
@@ -184,8 +214,8 @@ export function metadataVerdict(i: MetadataInput): MetadataVerdict {
     `tokens for ${audiences.join(', ')} as ServiceAccount ${sa}`,
   ];
   const notes: string[] = [];
-  if (!vm.spec?.template?.spec?.domain?.chassis?.asset && !asked)
-    notes.push(`Without the chassis asset tag "${CHASSIS_ASSET}" cloud-init in the guest does not look for the service (k4all sets it on VMs that ask for it).`);
+  const tagWarning = chassisAssetWarning(vm.spec?.template?.spec?.domain?.chassis?.asset, vm, service);
+  if (tagWarning) notes.push(tagWarning);
   if (i.serviceAccounts && !i.serviceAccounts.includes(sa)) notes.push(`ServiceAccount ${sa} does not exist in ${vm.metadata.namespace}: the VM cannot start until it does.`);
   if (service.condition && service.condition.status !== 'True')
     notes.push(`k4all reports the service as not ready${service.condition.message ? `: ${service.condition.message}` : service.condition.reason ? ` (${service.condition.reason})` : ''}.`);

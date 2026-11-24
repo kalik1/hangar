@@ -1,5 +1,6 @@
 import {
   CHASSIS_ASSET,
+  chassisAssetWarning,
   L_METADATA,
   L_SERVICE_ACCOUNT,
   metadataChoice,
@@ -7,6 +8,7 @@ import {
   metadataService,
   metadataVerdict,
   serviceAccountProblem,
+  usesMetadata,
   withMetadata,
 } from './metadata';
 import { Obj } from './types';
@@ -110,12 +112,22 @@ describe('whether a VM gets the metadata service, and why not', () => {
     expect(v.why).toMatch(L_METADATA);
   });
 
-  it('serves every VM with scope All, and says when the guest will not look for it', () => {
-    const v = metadataVerdict({ vm: vm(), namespace: ns(), service: metadataService(clusterConfig({ enabled: true, scope: 'All' })), events: [] });
+  it('serves every VM with scope All but those that opt out; k4all tags the chassis of those it serves', () => {
+    const all = metadataService(clusterConfig({ enabled: true, scope: 'All' }));
+    const v = metadataVerdict({ vm: vm(), namespace: ns(), service: all, events: [] });
     expect(v.state).toBe('on');
-    expect(v.notes.join(' ')).toMatch(/OpenStack Nova/);
-    const tagged = metadataVerdict({ vm: vm({}, { domain: { chassis: { asset: CHASSIS_ASSET } } }), namespace: ns(), service: metadataService(clusterConfig({ enabled: true, scope: 'All' })), events: [] });
-    expect(tagged.notes.join(' ')).not.toMatch(/OpenStack Nova/);
+    expect(v.notes).toEqual([]);
+    const out = metadataVerdict({ vm: vm({ [L_METADATA]: 'disabled' }), namespace: ns(), service: all, events: [] });
+    expect(out.state).toBe('not-asked');
+    expect(out.why).toMatch(`${L_METADATA}: disabled`);
+  });
+
+  it('says when a custom chassis asset tag keeps cloud-init from finding the service', () => {
+    const custom = metadataVerdict({ vm: vm(ON, { domain: { chassis: { asset: 'Rack 12' } } }), namespace: ns(), service: svc, events: [] });
+    expect(custom.state).toBe('on');
+    expect(custom.notes.join(' ')).toMatch(/OpenStack datasource/);
+    const tagged = metadataVerdict({ vm: vm(ON, { domain: { chassis: { asset: CHASSIS_ASSET } } }), namespace: ns(), service: svc, events: [] });
+    expect(tagged.notes).toEqual([]);
   });
 
   it('skips a namespace enforcing PodSecurity baseline or restricted (D8): the VM keeps its cloud-init disk', () => {
@@ -188,5 +200,30 @@ describe('the wizard’s metadata switch', () => {
     expect(metadataChoice(true, on, false)).toBe(false);
     expect(metadataChoice(true, off, true)).toBe(true);
     expect(metadataChoice(false, on, true)).toBe(false);
+  });
+});
+
+describe('chassis asset tag and the metadata service', () => {
+  const on = (scope: 'Labelled' | 'All') => metadataService(clusterConfig({ enabled: true, scope }));
+  it('knows which VMs use the service', () => {
+    expect(usesMetadata(vm({ [L_METADATA]: 'enabled' }), on('Labelled'))).toBe(true);
+    expect(usesMetadata(vm(), on('Labelled'))).toBe(false);
+    expect(usesMetadata(vm(), on('All'))).toBe(true);
+    expect(usesMetadata(vm({ [L_METADATA]: 'disabled' }), on('All'))).toBe(false);
+    expect(usesMetadata(vm(), metadataService(clusterConfig({ enabled: false, scope: 'All' })))).toBe(false);
+    // Hangar cannot read k4all's settings: only a VM that asks counts.
+    expect(usesMetadata(vm({ [L_METADATA]: 'enabled' }), 'unknown')).toBe(true);
+    expect(usesMetadata(vm(), 'unknown')).toBe(false);
+  });
+  it('warns about a custom asset tag on a VM that uses the service', () => {
+    const asks = vm({ [L_METADATA]: 'enabled' });
+    expect(chassisAssetWarning('Rack 12', asks, on('Labelled'))).toMatch(/OpenStack datasource/);
+    expect(chassisAssetWarning('  Rack 12 ', vm(), on('All'))).toMatch(/"Rack 12"/);
+    // Empty (k4all sets it) or k4all's own tag: fine.
+    expect(chassisAssetWarning('', asks, on('Labelled'))).toBeNull();
+    expect(chassisAssetWarning(CHASSIS_ASSET, asks, on('Labelled'))).toBeNull();
+    // VMs without the service may tag their chassis freely.
+    expect(chassisAssetWarning('Rack 12', vm(), on('Labelled'))).toBeNull();
+    expect(chassisAssetWarning('Rack 12', asks, null)).toBeNull();
   });
 });
