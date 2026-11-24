@@ -162,11 +162,16 @@ history keeps growing, the tasks keep being followed.
   not (service off, not asked or opted out with
   `k4all.magesgate.com/metadata: disabled` under scope All, no pod network
   adapter, PodSecurity). k4all's Warning Events on the VM (reason
-  `Metadata…` from a k4all component) become notes; `MetadataNotServed`
-  marks the VM not served only when Hangar cannot read the folder, whose
-  labels are fresher than an Event (k4all never clears them, they fade
-  with the Event TTL), and `MetadataChassisAsset` is left to the spec
-  check below. k4all sets the asset tag on the VMs
+  `Metadata…` from a k4all component) are history, not state: k4all
+  cannot clear them, they fade with the Event TTL (an hour by default).
+  They become notes with their age ("k4all, 12m ago: …"), the newest of
+  each reason, and those older than the running instance are dropped;
+  `MetadataNotServed` marks the VM not served only when Hangar cannot read
+  the folder, whose labels are current, and `MetadataChassisAsset` is left
+  to the spec check below. Hangar does not read the `k4all-md-<vm>` Secret
+  for the current state: even metadata only needs `get` on Secrets, which
+  also returns their data (user-data, tokens), and a viewer role must not
+  need that. k4all sets the asset tag on the VMs
   it serves when they have none; a tag of the user's wins, and then
   cloud-init never looks for the service: the summary and the SMBIOS row
   and dialog say so for VMs that get the service.
@@ -576,3 +581,7 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
 - Folder quotas (ResourceQuota) shown as folder capacity.
 - VM–VM affinity rules ("keep apart", "keep together") as DRS-like groups.
 - Translations (Italian first) through Headlamp's i18n.
+- A current-state signal for k4all's metadata warnings that is not a
+  Secret (e.g. a condition or an annotation on the VM, written and cleared
+  by the operator), so the VM summary need not read Events as history: to
+  decide with k4all.

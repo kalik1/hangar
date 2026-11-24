@@ -53,6 +53,8 @@ const event = (reason: string, message: string, type = 'Warning', component = 'k
 });
 
 const ON = { [L_METADATA]: 'enabled' };
+/** Five minutes after the fixtures' Events. */
+const NOW = Date.parse('2026-11-24T10:05:00Z');
 
 describe('the metadata service in the ClusterConfig', () => {
   it('reads it on, with scope and audiences', () => {
@@ -154,9 +156,9 @@ describe('whether a VM gets the metadata service, and why not', () => {
 
   it('says the VM is not served when k4all says so and Hangar cannot read the folder', () => {
     const evs = [event('MetadataNotServed', 'namespace demo enforces PodSecurity "baseline", which forbids the NET_ADMIN capability')];
-    const v = metadataVerdict({ vm: vm(ON), service: svc, events: evs });
+    const v = metadataVerdict({ vm: vm(ON), service: svc, events: evs, now: NOW });
     expect(v.state).toBe('skipped');
-    expect(v.why).toBe('k4all: namespace demo enforces PodSecurity "baseline", which forbids the NET_ADMIN capability');
+    expect(v.why).toBe('k4all, 5m ago: namespace demo enforces PodSecurity "baseline", which forbids the NET_ADMIN capability');
     // with the folder in hand its labels are current, the Event may be an hour old
     expect(metadataVerdict({ vm: vm(ON), namespace: ns(), service: svc, events: evs }).state).toBe('on');
     // other components' events, other reasons and other objects do not count
@@ -169,9 +171,24 @@ describe('whether a VM gets the metadata service, and why not', () => {
       event('MetadataIncomplete', 'the metadata service serves this VM without what is missing: Secret web-ci not found'),
       event('MetadataSecretTaken', 'Secret k4all-md-web exists and is not k4all’s'),
     ];
-    const v = metadataVerdict({ vm: vm(ON), namespace: ns(), service: svc, events: evs });
+    const v = metadataVerdict({ vm: vm(ON), namespace: ns(), service: svc, events: evs, now: NOW });
     expect(v.state).toBe('on');
-    expect(v.notes).toEqual(['k4all: the metadata service serves this VM without what is missing: Secret web-ci not found', 'k4all: Secret k4all-md-web exists and is not k4all’s']);
+    // Events are history (k4all cannot clear them): each note says how old it is
+    expect(v.notes).toEqual(['k4all, 5m ago: the metadata service serves this VM without what is missing: Secret web-ci not found', 'k4all, 5m ago: Secret k4all-md-web exists and is not k4all’s']);
+  });
+
+  it('drops k4all’s Events older than the running instance', () => {
+    const evs = [
+      event('MetadataIncomplete', 'before the restart', 'Warning', 'k4all-operator', '2026-11-24T09:58:00Z'),
+      event('MetadataSecretTaken', 'since the restart', 'Warning', 'k4all-operator', '2026-11-24T10:01:00Z'),
+      event('MetadataNotServed', 'before the restart', 'Warning', 'k4all-operator', '2026-11-24T09:59:00Z'),
+    ];
+    const vmi = { apiVersion: 'kubevirt.io/v1', kind: 'VirtualMachineInstance', metadata: { name: 'web', namespace: 'demo', creationTimestamp: '2026-11-24T10:00:00Z' } };
+    const v = metadataVerdict({ vm: vm(ON), service: svc, events: evs, vmi, now: NOW });
+    expect(v.state).toBe('on');
+    expect(v.notes).toEqual(['k4all, 4m ago: since the restart']);
+    // a stopped VM keeps them all
+    expect(metadataVerdict({ vm: vm(ON), service: svc, events: evs, now: NOW }).state).toBe('skipped');
   });
 
   it('leaves the asset tag to the VM spec: k4all’s Event outlives a fix', () => {

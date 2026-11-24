@@ -24,6 +24,7 @@
  */
 
 import { Obj } from './types';
+import { formatAge } from './units';
 
 export const L_METADATA = 'k4all.magesgate.com/metadata';
 export const METADATA_ENABLED = 'enabled';
@@ -188,6 +189,10 @@ export interface MetadataInput {
   events: Obj[];
   /** ServiceAccounts of the namespace; null when Hangar cannot list them. */
   serviceAccounts?: string[] | null;
+  /** The VM's running instance: k4all's Events from before it started are dropped. */
+  vmi?: Obj;
+  /** For the age of k4all's Events; default now. */
+  now?: number;
 }
 
 const hasCloudInitDisk = (vm: Obj) => (vm.spec?.template?.spec?.volumes ?? []).some((v: any) => v?.cloudInitNoCloud || v?.cloudInitConfigDrive);
@@ -221,8 +226,13 @@ export function metadataVerdict(i: MetadataInput): MetadataVerdict {
       why: `Folder ${vm.metadata.namespace} enforces PodSecurity ${level}, which forbids what the service needs (NET_ADMIN): k4all does not inject it there, and the VM keeps its cloud-init disk.`,
     };
   }
-  const evs = metadataEvents(i.events, vm).filter(e => e.type === 'Warning' && e.reason !== EV_CHASSIS_ASSET);
-  const say = (e: Obj) => `k4all: ${e.message ?? e.reason}`;
+  // Events are history: k4all cannot clear them, they fade with the Event TTL.
+  // Those from before the running instance started are about an older one.
+  const started = Date.parse(i.vmi?.metadata?.creationTimestamp ?? '');
+  const evs = metadataEvents(i.events, vm).filter(
+    e => e.type === 'Warning' && e.reason !== EV_CHASSIS_ASSET && !(Date.parse(evTime(e)) < started)
+  );
+  const say = (e: Obj) => `k4all, ${formatAge(evTime(e), i.now)} ago: ${e.message ?? e.reason}`;
   // With the folder in hand its PodSecurity labels (above) are current; the Event may be stale.
   const notServed = !i.namespace && evs.find(e => e.reason === EV_NOT_SERVED);
   if (notServed) return { ...base, state: 'skipped', why: say(notServed) };

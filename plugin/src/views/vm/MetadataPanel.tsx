@@ -13,6 +13,7 @@ import { useHangar } from '../../api/data';
 import { useK4allMetadata, useServiceAccounts } from '../../api/k4all';
 import { L_METADATA, L_SERVICE_ACCOUNT, MetadataState, metadataVerdict } from '../../model/metadata';
 import { Obj } from '../../model/types';
+import { key } from '../../model/vm';
 import { useK8s } from '../../shell/settings';
 import { K8sName, Panel } from '../../ui/kit';
 import { Led } from '../../ui/Led';
@@ -60,7 +61,7 @@ export function MetadataPanel({ vm }: { vm: Obj }) {
   const events = useVmEvents(ns, vm.metadata.name, k4.on);
   const serviceAccounts = useServiceAccounts(k4.on ? ns : undefined);
   if (!k4.on || k4.metadata === undefined) return null;
-  const v = metadataVerdict({ vm, namespace: d.namespaces.find(n => n.metadata.name === ns), service: k4.metadata, events, serviceAccounts });
+  const v = metadataVerdict({ vm, namespace: d.namespaces.find(n => n.metadata.name === ns), service: k4.metadata, events, serviceAccounts, vmi: d.idx.vmi.get(key(vm)) });
   const head = TONES[v.state];
   return (
     <Panel title="Metadata service" icon="mdi:cloud-key-outline">
