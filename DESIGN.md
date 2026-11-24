@@ -147,7 +147,20 @@ history keeps growing, the tasks keep being followed.
   container registry, empty disk), CPU and memory (custom or size profile,
   firmware, TPM), disks and datastore, network adapters, guest
   customization (form or own cloud-config), review with power policy and
-  maintenance behaviour, Create (or Review YAML).
+  maintenance behaviour, Create (or Review YAML). On k4all, guest
+  customization also asks for k4all's metadata service on 169.254.169.254
+  (on by default when k4all's ClusterConfig turns it on:
+  `spec.features.virt.metadata.enabled`, read instead of looking for the
+  admission policy, whose name is k4all's own detail): the template label
+  `k4all.magesgate.com/metadata: enabled`, `chassis.asset: OpenStack Nova`
+  (cloud-init looks for the service only with it) and a ServiceAccount
+  picker (label `k4all.magesgate.com/service-account`, the folder's
+  `default` without it). The cloud-init disk stays: VMs in folders that
+  enforce PodSecurity baseline or restricted are not injected and keep
+  using it (D8). The VM summary says whether the VM gets the service, what
+  it serves (instance-id = the VM's UID, cloud-init data, tokens) and why
+  not (service off, not asked, no pod network adapter, PodSecurity, or the
+  Event k4all writes on the VM: reason `Metadata…` from a k4all component).
 - **Clone, clone to template, new VM from template**: every persistent disk
   is copied with CDI; the copy gets new MAC addresses, a new firmware UUID
   and serial, and its own hostname in cloud-init.
@@ -420,7 +433,7 @@ plugin/
   src/model/                 pure logic with unit tests: vm, vmspec, edit, vmoptions
                              (options, devices, CPU, disk settings, shares, hot-add),
                              gates (feature gate table), protection, tasks, units,
-                             ownership (k4all's fields, shared with Cairn),
+                             ownership (k4all's fields, shared with Cairn), metadata,
                              hardware (inventory, mappings, passthrough edits),
                              inventory, capacity, alarms, ...
   src/ui/                    tokens, LED, kit (panels, meters, …), DataTable, dialogs

@@ -6,6 +6,7 @@
  */
 
 import { applyDns, DnsSettings } from './dns';
+import { withMetadata } from './metadata';
 import { withVmProtection } from './protection';
 import { Obj, VM } from './types';
 import { GiB, parseQuantity, toQuantity } from './units';
@@ -197,6 +198,8 @@ export interface WizardInput {
   sound?: 'ich9' | 'ac97';
   /** NAT network inside the pod for pod-network adapters (vmNetworkCIDR); undefined: KubeVirt's 10.0.2.0/24. */
   vmNetworkCidr?: string;
+  /** Ask for k4all's metadata service (model/metadata.ts); serviceAccount: whose tokens the guest gets. */
+  metadata?: { serviceAccount?: string };
 }
 
 export function cloudInitUserData(c: NonNullable<WizardInput['cloudInit']>, hostname: string): string {
@@ -322,7 +325,7 @@ export function buildVm(w: WizardInput): VM {
       },
     };
   }
-  const spec: any = {
+  let spec: any = {
     runStrategy: w.runStrategy,
     dataVolumeTemplates: dvts,
     template: {
@@ -330,6 +333,7 @@ export function buildVm(w: WizardInput): VM {
       spec: templateSpec,
     },
   };
+  if (w.metadata) spec = withMetadata(spec, w.metadata);
   if (w.instancetype) spec.instancetype = { kind: w.instancetypeKind || 'VirtualMachineClusterInstancetype', name: w.instancetype };
   if (w.preference) spec.preference = { kind: 'VirtualMachineClusterPreference', name: w.preference };
   const vm: VM = {

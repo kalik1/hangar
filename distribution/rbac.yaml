@@ -1,7 +1,8 @@
 # Roles for Hangar users other than cluster-admin. Bind them per folder
 # (namespace) with a RoleBinding, or cluster-wide with a ClusterRoleBinding.
 #
-#   hangar-viewer       sees VMs, hosts, datastores, networks, the library, events
+#   hangar-viewer       sees VMs, hosts, datastores, networks, the library, events,
+#                       ServiceAccounts (the wizard's pick for k4all's metadata service)
 #   hangar-vm-operator  + power operations, consoles, migrations, snapshots
 #   hangar-vm-admin     + creates, edits, clones and deletes VMs, disks, images
 #
@@ -40,7 +41,7 @@ rules:
     resources: [volumesnapshotclasses]
     verbs: [get, list, watch]
   - apiGroups: ['']
-    resources: [nodes, namespaces, persistentvolumeclaims, pods, events]
+    resources: [nodes, namespaces, persistentvolumeclaims, pods, events, serviceaccounts]
     verbs: [get, list, watch]
   - apiGroups: [storage.k8s.io]
     resources: [storageclasses, csistoragecapacities]
