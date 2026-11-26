@@ -7,8 +7,8 @@
 # image volume.
 #
 # Build context: the repository root.
-#   podman build -f Containerfile --build-arg PLUGIN_VERSION=0.1.0 \
-#     -t ghcr.io/kalik1/hangar-headlamp-plugin:0.1.0 .
+#   podman build -f Containerfile --build-arg PLUGIN_VERSION=0.1.1 \
+#     -t ghcr.io/kalik1/hangar-headlamp-plugin:0.1.1 .
 #
 # The JavaScript is architecture independent: it is built once on the build
 # platform; only the tiny runtime base differs per architecture.

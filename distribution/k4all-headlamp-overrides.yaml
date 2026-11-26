@@ -30,7 +30,7 @@ spec:
               seccompProfile: {type: RuntimeDefault}
             volumeMounts: [{name: k4all-plugin, mountPath: /k4all-plugin}]
           - name: hangar-plugin
-            image: ghcr.io/kalik1/hangar-headlamp-plugin:0.1.0
+            image: ghcr.io/kalik1/hangar-headlamp-plugin:0.1.1
             imagePullPolicy: IfNotPresent
             command: [sh, -c, "cp -R /plugins/hangar-headlamp-plugin/. /hangar-plugin/"]
             resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}

@@ -1,6 +1,6 @@
 {
   "name": "hangar-headlamp-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Hangar: a virtualization console for KubeVirt and CDI, as a Headlamp plugin",
   "license": "GPL-3.0-only",
   "private": true,
