@@ -366,6 +366,11 @@ export const K4ALL_DISABLED_GATES_ANNOTATION = 'k4all.magesgate.com/disabled-fea
  * operator applies (managedFields). cpuModel, evictionStrategy,
  * vmRolloutStrategy and permittedHostDevices stay Hangar's (D3). Nothing
  * when k4all does not run the cluster.
+ *
+ * `fields` is the resource as a GET returns it, the one the settings are
+ * read from: Headlamp's lists drop managedFields (api/managedFields.ts).
+ * By default kv itself (already a GET); null: none yet, no setting is
+ * k4all's. The gates come from kv's annotations.
  */
 export interface K4allKubevirt {
   useEmulation: boolean;
@@ -376,11 +381,11 @@ export interface K4allKubevirt {
   gatesOff: string[];
 }
 
-export function k4allKubevirt(kv: Obj | null | undefined, k4all: boolean): K4allKubevirt {
+export function k4allKubevirt(kv: Obj | null | undefined, k4all: boolean, fields: Obj | null | undefined = kv): K4allKubevirt {
   return {
-    useEmulation: k4allOwns(kv, 'spec.configuration.developerConfiguration.useEmulation', k4all),
-    vmStateStorageClass: k4allOwns(kv, 'spec.configuration.vmStateStorageClass', k4all),
-    workloadUpdateMethods: k4allOwns(kv, 'spec.workloadUpdateStrategy.workloadUpdateMethods', k4all),
+    useEmulation: k4allOwns(fields, 'spec.configuration.developerConfiguration.useEmulation', k4all),
+    vmStateStorageClass: k4allOwns(fields, 'spec.configuration.vmStateStorageClass', k4all),
+    workloadUpdateMethods: k4allOwns(fields, 'spec.workloadUpdateStrategy.workloadUpdateMethods', k4all),
     gatesOn: k4all ? k4allAnnotationList(kv, K4ALL_GATES_ANNOTATION) : [],
     gatesOff: k4all ? k4allAnnotationList(kv, K4ALL_DISABLED_GATES_ANNOTATION) : [],
   };

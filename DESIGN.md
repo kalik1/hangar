@@ -316,7 +316,9 @@ history keeps growing, the tasks keep being followed.
     What k4all's operator applies (`model/ownership.ts`, managedFields,
     manager exactly `k4all-operator`) is read-only too: the VM state
     datastore and software emulation (links to the addon), the release's
-    update methods ("set by the k4all release"). cpuModel, evictionStrategy,
+    update methods ("set by the k4all release"). Those managedFields come
+    from a GET of the KubeVirt resource (`api/managedFields.ts`):
+    Headlamp's list hooks delete them from listed objects. cpuModel, evictionStrategy,
     vmRolloutStrategy and the device mappings stay Hangar's.
   - *Delete protection*: whether the policy and its binding are installed
     (GET on both; "cannot tell" without the right to read them), how to
@@ -349,6 +351,9 @@ confirm and say what is lost (delete asks to type the name).
   (StorageClasses, instance types, preferences, StorageProfiles,
   NetworkAttachmentDefinitions, KubeVirt and CDI config) to keep the
   number of WebSockets low. Missing CRDs (404) turn features off (`has`).
+  Headlamp (v0.46) deletes `metadata.managedFields` from every listed
+  object: whatever reads ownership from them (what k4all owns) GETs the
+  single object instead (`src/api/managedFields.ts`).
 - `src/api/metrics.ts`: metrics-server, every 15 s while Hangar is open:
   each VM's virt-launcher pod (what the VM really uses on its host) and each
   host; 30 minutes of history in memory.

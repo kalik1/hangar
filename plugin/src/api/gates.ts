@@ -15,13 +15,14 @@ import { useHangar } from './data';
 import { isK4all } from './k4all';
 import { useCan } from './permissions';
 
-const kvPath = (kv: Obj) => `/apis/kubevirt.io/v1/namespaces/${kv.metadata.namespace}/kubevirts/${kv.metadata.name}`;
+/** The API path of the KubeVirt resource, for a GET or a write. */
+export const kubevirtPath = (kv: Obj) => `/apis/kubevirt.io/v1/namespaces/${kv.metadata.namespace}/kubevirts/${kv.metadata.name}`;
 
 /** Turns a gate on or off; other gates stay. Retries when the resource changed meanwhile. */
 export function setFeatureGate(kv: Obj, name: string, on: boolean) {
   return runTask({ title: `${on ? 'Turn on' : 'Turn off'} ${name}`, target: { kind: 'datacenter', name: 'Features' } }, async () => {
     for (let attempt = 0; ; attempt++) {
-      const fresh = await kreq<Obj>(kvPath(kv));
+      const fresh = await kreq<Obj>(kubevirtPath(kv));
       const next = nextGates(fresh, name, on);
       // A gate k4all's ClusterConfig lists is k4all's: it would put it back.
       const owned = k4allKubevirt(fresh, await isK4all());
@@ -31,7 +32,7 @@ export function setFeatureGate(kv: Obj, name: string, on: boolean) {
       const writeDisabled = !!gateTable(fresh)?.disabledList || disabledGates(fresh).length > 0;
       try {
         // A merge patch replaces just these lists; the resourceVersion makes it fail if the resource changed since the read.
-        await kmerge(kvPath(fresh), {
+        await kmerge(kubevirtPath(fresh), {
           metadata: { resourceVersion: fresh.metadata.resourceVersion },
           spec: {
             configuration: {

@@ -24,8 +24,9 @@ import Typography from '@mui/material/Typography';
 import React from 'react';
 import { Link as RouterLink, useHistory } from 'react-router-dom';
 import { HangarData, useHangar } from '../../api/data';
-import { setFeatureGate, useCanPatchKubevirt } from '../../api/gates';
+import { kubevirtPath, setFeatureGate, useCanPatchKubevirt } from '../../api/gates';
 import { useK4all } from '../../api/k4all';
+import { useManagedFields } from '../../api/managedFields';
 import { NOT_ALLOWED } from '../../api/permissions';
 import { useProtectionPolicy } from '../../api/protection';
 import {
@@ -370,7 +371,9 @@ function Features({ d, focus }: { d: HangarData; focus?: string }) {
   const kv = d.kubevirt;
   const canPatch = useCanPatchKubevirt(kv);
   const k4all = useK4all();
-  const owned = k4allKubevirt(kv, k4all);
+  // What k4all's operator applies is in managedFields, which Headlamp's list drops: read them from a GET.
+  const fields = useManagedFields(kv, kv ? kubevirtPath(kv) : null, k4all);
+  const owned = k4allKubevirt(kv, k4all, fields);
   const [more, setMore] = React.useState(false);
   const rows = gateRows(kv, owned);
   const table = gateTable(kv);

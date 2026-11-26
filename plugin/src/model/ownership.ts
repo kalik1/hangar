@@ -21,6 +21,9 @@
  * - Entries of a shared list (KubeVirt's featureGates) cannot be told apart
  *   in managedFields (an atomic list has one manager): k4all lists the ones
  *   it added in an annotation of the object (k4allAnnotationList).
+ * - Give these functions the object as a GET returns it: Headlamp's list
+ *   queries delete metadata.managedFields from every listed object, so a
+ *   listed copy has no owner (src/api/managedFields.ts reads the GET).
  */
 
 import { ManagedFieldsEntry, Obj } from './types';

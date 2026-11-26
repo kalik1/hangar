@@ -176,6 +176,20 @@ describe('what k4all owns on the KubeVirt resource', () => {
     expect(G.k4allKubevirt(owned(), false)).toEqual({ useEmulation: false, vmStateStorageClass: false, workloadUpdateMethods: false, gatesOn: [], gatesOff: [] });
   });
 
+  it('reads the settings from the GET copy and the gates from the listed one (Headlamp lists drop managedFields)', () => {
+    const listed = owned();
+    delete listed.metadata.managedFields;
+    // The listed copy alone: the gates (annotations) but no setting.
+    expect(G.k4allKubevirt(listed, true)).toEqual({ useEmulation: false, vmStateStorageClass: false, workloadUpdateMethods: false, gatesOn: ['Sidecar'], gatesOff: ['VideoConfig'] });
+    // With the GET copy: its managedFields for the settings, the listed annotations for the gates.
+    const got = owned();
+    got.metadata.annotations = { 'k4all.magesgate.com/feature-gates': 'Sidecar,VSOCK' };
+    expect(G.k4allKubevirt(listed, true, got)).toEqual({ useEmulation: true, vmStateStorageClass: true, workloadUpdateMethods: true, gatesOn: ['Sidecar'], gatesOff: ['VideoConfig'] });
+    // No GET copy yet: no setting is k4all's; the gates still are.
+    expect(G.k4allKubevirt(listed, true, null)).toMatchObject({ vmStateStorageClass: false, gatesOn: ['Sidecar'] });
+    expect(G.k4allKubevirt(listed, false, got)).toEqual({ useEmulation: false, vmStateStorageClass: false, workloadUpdateMethods: false, gatesOn: [], gatesOff: [] });
+  });
+
   it('a v2.6 operator applying workloadUpdateStrategy: {} owns no update method (R9)', () => {
     const k = kv([], 'v1.9.1', { spec: { workloadUpdateStrategy: { workloadUpdateMethods: ['LiveMigrate'] } } });
     k.metadata.managedFields = [
