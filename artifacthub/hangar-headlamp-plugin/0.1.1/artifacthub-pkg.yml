@@ -1,0 +1,18 @@
+version: 0.1.1
+name: hangar-headlamp-plugin
+displayName: "Hangar"
+createdAt: "2026-11-26T20:21:37Z"
+description: "A virtualization console for KubeVirt and CDI: VMs and their consoles, hosts, datastores, networks, images and templates."
+license: GPL-3.0-only
+homeURL: https://github.com/kalik1/hangar
+keywords: [kubevirt, cdi, virtualization, virtual machines, kubernetes]
+links:
+  - name: Source
+    url: https://github.com/kalik1/hangar
+  - name: Image (initContainer)
+    url: https://github.com/kalik1/hangar/pkgs/container/hangar-headlamp-plugin
+annotations:
+  headlamp/plugin/archive-url: "https://github.com/kalik1/hangar/releases/download/v0.1.1/hangar-headlamp-plugin-0.1.1.tar.gz"
+  headlamp/plugin/archive-checksum: "SHA256:6d30fa2c7f867b14a1addc9aad7094cc8aeab5bfdb15e6e2a57ba2b8f7128c3b"
+  headlamp/plugin/version-compat: ">=0.46"
+  headlamp/plugin/distro-compat: "in-cluster,web"
