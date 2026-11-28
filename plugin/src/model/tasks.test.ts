@@ -38,6 +38,20 @@ describe('task store', () => {
     expect(give.status).toBe('warning');
     expect(give.message).toMatch(/Interrupted/);
   });
+  it('offers Cancel for a running task started on this page, never stored, gone once it ends', () => {
+    const mem = new Map<string, string>();
+    const s = new TaskStore({ getItem: k => mem.get(k) ?? null, setItem: (k, v) => void mem.set(k, v) });
+    s.useCluster('a');
+    const t = s.add({ title: 'Upload big.iso' });
+    const stop = vi.fn();
+    s.setCancel(t.id, stop);
+    expect(s.canCancel(t.id)).toBe(true);
+    s.cancel(t.id);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(mem.get('hangar.tasks.a')).not.toContain('cancel');
+    s.update(t.id, { status: 'warning', message: 'Cancelled' });
+    expect(s.canCancel(t.id)).toBe(false);
+  });
 });
 
 describe('until', () => {
