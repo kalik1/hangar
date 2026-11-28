@@ -5,7 +5,7 @@
  */
 
 import { Task, tasks, TaskTarget, Until } from '../model/tasks';
-import { VM } from '../model/types';
+import { Obj, VM } from '../model/types';
 import { errorText, kdelete, kjsonpatch, kmerge, kpost, kput, kreq } from './client';
 import { PATHS } from './resources';
 
@@ -172,7 +172,81 @@ export function releaseClaim(namespace: string, claim: string) {
   );
 }
 
-/** Deletes the VM. Disks it owns (dataVolumeTemplates) go with it unless `keepDisks`. */
+/** A disk the VM owns, so it would go with the VM: a DataVolume, or a claim with no DataVolume. */
+export interface OwnedDisk {
+  kind: 'dv' | 'pvc';
+  name: string;
+  /** Where the VM's entry sits in the disk's ownerReferences. */
+  index: number;
+  /** The VM's uid there (what the JSON patch tests). */
+  uid: string;
+}
+
+/**
+ * The disks the VM owns: its DataVolumes (from dataVolumeTemplates, and
+ * ones taken out of it, which KubeVirt keeps owned by the VM) and claims it
+ * owns directly (CDI hands a DataVolume's owner to its claim when it
+ * garbage-collects the DataVolume). KubeVirt's persistent state (TPM, EFI
+ * variables) is not a disk: it goes with the VM.
+ */
+export function vmOwnedDisks(vm: VM, dvs: Obj[], pvcs: Obj[]): OwnedDisk[] {
+  const uid = vm.metadata.uid;
+  if (!uid) return [];
+  const out: OwnedDisk[] = [];
+  const add = (kind: OwnedDisk['kind'], o: Obj) => {
+    const index = (o.metadata.ownerReferences ?? []).findIndex(r => r.uid === uid);
+    if (index >= 0) out.push({ kind, name: o.metadata.name, index, uid });
+  };
+  dvs.forEach(o => add('dv', o));
+  pvcs.filter(o => !o.metadata.labels?.['persistent-state-for']).forEach(o => add('pvc', o));
+  return out;
+}
+
+async function listIn(path: string): Promise<Obj[]> {
+  try {
+    return (await kreq<{ items?: Obj[] }>(path)).items ?? [];
+  } catch (e: any) {
+    if (e?.status === 404) return []; // no CDI: no DataVolumes
+    throw e;
+  }
+}
+
+/**
+ * Lets every disk the VM owns outlive it. First the VM's dataVolumeTemplates
+ * go (else KubeVirt adopts a released DataVolume again when the template
+ * still names it); then the VM's entry in each disk's ownerReferences (the
+ * patch tests it is still there; other owners stay). A failure stops here,
+ * before the VM is deleted.
+ */
+async function releaseDisksOf(vm: VM) {
+  if (vm.spec?.dataVolumeTemplates?.length)
+    await kmerge(PATHS.vm(ns(vm), nm(vm)), { spec: { dataVolumeTemplates: null } }).catch(e => {
+      throw new Error(`Could not keep the disks: ${errorText(e)}`);
+    });
+  const [dvs, pvcs] = await Promise.all([listIn(PATHS.dv(ns(vm))), listIn(PATHS.pvc(ns(vm)))]).catch(e => {
+    throw new Error(`Could not list the disks to keep: ${errorText(e)}`);
+  });
+  for (const d of vmOwnedDisks(vm, dvs, pvcs)) {
+    const path = d.kind === 'dv' ? PATHS.dv(ns(vm), d.name) : PATHS.pvc(ns(vm), d.name);
+    const ref = `/metadata/ownerReferences/${d.index}`;
+    await kjsonpatch(path, [
+      { op: 'test', path: `${ref}/uid`, value: d.uid },
+      { op: 'remove', path: ref },
+    ]).catch((e: any) => {
+      if (e?.status === 404) return; // gone meanwhile: nothing to keep
+      throw new Error(`Could not keep disk ${d.name}: ${errorText(e)}`);
+    });
+  }
+}
+
+/**
+ * Deletes the VM. Disks it owns (dataVolumeTemplates) go with it unless
+ * `keepDisks`: then they are released first, and the VM is deleted with
+ * the normal propagation, so what else it owns (KubeVirt's instancetype and
+ * preference revisions, its persistent state) goes with it. Orphaning
+ * everything instead never finishes: the garbage collector cannot update
+ * those revisions, which are immutable.
+ */
 export function deleteVm(vm: VM, opts: { keepDisks?: boolean } = {}) {
   return runTask(
     {
@@ -180,13 +254,25 @@ export function deleteVm(vm: VM, opts: { keepDisks?: boolean } = {}) {
       target: vmTarget(vm),
       until: { type: 'vmGone', namespace: ns(vm), name: nm(vm) },
     },
-    () =>
-      kdelete(PATHS.vm(ns(vm), nm(vm)), {
+    async () => {
+      if (opts.keepDisks) await releaseDisksOf(vm);
+      return kdelete(PATHS.vm(ns(vm), nm(vm)), {
         kind: 'DeleteOptions',
         apiVersion: 'v1',
-        propagationPolicy: opts.keepDisks ? 'Orphan' : 'Foreground',
-      })
+        propagationPolicy: opts.keepDisks ? 'Background' : 'Foreground',
+      });
+    }
   );
+}
+
+/**
+ * A deletion that waits on the garbage collector's orphan finalizer, as
+ * Hangar 0.1.x's "keep disks" left it (it never finishes when the VM owns
+ * instancetype or preference revisions). Deleting again replaces that
+ * finalizer.
+ */
+export function deletionStuckOrphaning(vm: VM): boolean {
+  return !!vm.metadata.deletionTimestamp && (vm.metadata.finalizers ?? []).includes('orphan');
 }
 
 function isTemplateVm(vm: VM) {

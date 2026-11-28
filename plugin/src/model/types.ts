@@ -11,6 +11,7 @@ export interface Meta {
   resourceVersion?: string;
   creationTimestamp?: string;
   deletionTimestamp?: string;
+  finalizers?: string[];
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
   ownerReferences?: { kind: string; name: string; uid?: string; apiVersion?: string; controller?: boolean }[];

@@ -238,7 +238,8 @@ export function vmActions(
     label: tpl ? 'Delete template…' : 'Delete…',
     icon: 'mdi:delete-outline',
     group: 'danger',
-    enabled: p.kind !== 'deleting' && !isProtected(vm),
+    // A deletion left waiting by an older Hangar's "keep disks" can be sent again.
+    enabled: (p.kind !== 'deleting' || A.deletionStuckOrphaning(vm)) && !isProtected(vm),
     why: isProtected(vm) ? 'Protected from deletion: turn protection off in Configure → Options first' : undefined,
     run: async () => {
       const r = await confirm({
@@ -246,7 +247,9 @@ export function vmActions(
         body: (
           <>
             <p>
-              {p.kind === 'off' || tpl
+              {p.kind === 'deleting'
+                ? "Its deletion is stuck: an earlier Hangar kept its disks by letting go of everything the VM owns, which KubeVirt's instancetype and preference records do not allow. Deleting again finishes it."
+                : p.kind === 'off' || tpl
                 ? 'The VM and its configuration are removed.'
                 : 'The VM is running: it is powered off and removed.'}
             </p>
