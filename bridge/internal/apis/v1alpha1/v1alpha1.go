@@ -27,10 +27,12 @@ const (
 	// Resource is the parent resource of every subresource: KubeVirt's VMIs.
 	Resource = "virtualmachineinstances"
 
-	// GuestInfo is the read-only subresource with what the guest agent reports.
-	GuestInfo = "guestinfo"
-	// GuestFiles is the subresource of file operations in the guest.
-	GuestFiles = "guestfiles"
+	// SubresourceGuestInfo is the read-only subresource with what the guest
+	// agent reports. Its answer is a GuestInfo.
+	SubresourceGuestInfo = "guestinfo"
+	// SubresourceGuestFiles is the subresource of file operations in the
+	// guest.
+	SubresourceGuestFiles = "guestfiles"
 )
 
 // SchemeGroupVersion is the group version of the guest bridge's API.
@@ -55,8 +57,8 @@ func (s Subresource) Allows(verb string) bool {
 // Subresources is the approved API: what discovery lists and what the bridge
 // serves. Its order is discovery's order.
 var Subresources = []Subresource{
-	{Name: GuestInfo, Kind: "GuestInfo", Verbs: []string{"get"}},
-	{Name: GuestFiles, Kind: "GuestFiles", Verbs: []string{"get", "create", "update", "delete"}},
+	{Name: SubresourceGuestInfo, Kind: "GuestInfo", Verbs: []string{"get"}},
+	{Name: SubresourceGuestFiles, Kind: "GuestFiles", Verbs: []string{"get", "create", "update", "delete"}},
 }
 
 // Lookup returns the subresource with the given name.

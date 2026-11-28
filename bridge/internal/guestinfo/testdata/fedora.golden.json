@@ -1,0 +1,575 @@
+{
+  "kind": "GuestInfo",
+  "apiVersion": "subresources.hangar.magesgate.com/v1alpha1",
+  "agent": {
+    "connected": true,
+    "healthy": true,
+    "version": "11.1.2",
+    "commands": [
+      {
+        "name": "guest-exec",
+        "enabled": true
+      },
+      {
+        "name": "guest-exec-status",
+        "enabled": true
+      },
+      {
+        "name": "guest-file-close",
+        "enabled": true
+      },
+      {
+        "name": "guest-file-flush",
+        "enabled": true
+      },
+      {
+        "name": "guest-file-open",
+        "enabled": true
+      },
+      {
+        "name": "guest-file-read",
+        "enabled": true
+      },
+      {
+        "name": "guest-file-seek",
+        "enabled": true
+      },
+      {
+        "name": "guest-file-write",
+        "enabled": true
+      },
+      {
+        "name": "guest-fsfreeze-freeze",
+        "enabled": true
+      },
+      {
+        "name": "guest-fsfreeze-freeze-list",
+        "enabled": true
+      },
+      {
+        "name": "guest-fsfreeze-status",
+        "enabled": true
+      },
+      {
+        "name": "guest-fsfreeze-thaw",
+        "enabled": true
+      },
+      {
+        "name": "guest-fstrim",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-cpustats",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-disks",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-diskstats",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-fsinfo",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-host-name",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-load",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-memory-block-info",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-memory-blocks",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-osinfo",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-time",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-timezone",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-users",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-vcpus",
+        "enabled": true
+      },
+      {
+        "name": "guest-info",
+        "enabled": true
+      },
+      {
+        "name": "guest-network-get-interfaces",
+        "enabled": true
+      },
+      {
+        "name": "guest-network-get-route",
+        "enabled": true
+      },
+      {
+        "name": "guest-ping",
+        "enabled": true
+      },
+      {
+        "name": "guest-set-memory-blocks",
+        "enabled": true
+      },
+      {
+        "name": "guest-set-time",
+        "enabled": true
+      },
+      {
+        "name": "guest-set-user-password",
+        "enabled": true
+      },
+      {
+        "name": "guest-set-vcpus",
+        "enabled": true
+      },
+      {
+        "name": "guest-shutdown",
+        "enabled": true
+      },
+      {
+        "name": "guest-ssh-add-authorized-keys",
+        "enabled": true
+      },
+      {
+        "name": "guest-ssh-get-authorized-keys",
+        "enabled": true
+      },
+      {
+        "name": "guest-ssh-remove-authorized-keys",
+        "enabled": true
+      },
+      {
+        "name": "guest-suspend-disk",
+        "enabled": true
+      },
+      {
+        "name": "guest-suspend-hybrid",
+        "enabled": true
+      },
+      {
+        "name": "guest-suspend-ram",
+        "enabled": true
+      },
+      {
+        "name": "guest-sync",
+        "enabled": true
+      },
+      {
+        "name": "guest-sync-delimited",
+        "enabled": true
+      }
+    ]
+  },
+  "system": {
+    "os": {
+      "kernelRelease": "7.2.11-300.fc45.x86_64",
+      "kernelVersion": "#1 SMP PREEMPT_DYNAMIC Thu Oct 15 17:29:26 UTC 2026",
+      "machine": "x86_64",
+      "id": "fedora",
+      "name": "Fedora Linux",
+      "prettyName": "Fedora Linux 45 (Cloud Edition)",
+      "version": "45 (Cloud Edition)",
+      "versionId": "45",
+      "variant": "Cloud Edition",
+      "variantId": "cloud"
+    },
+    "hostName": "fedora",
+    "timezone": {
+      "zone": "UTC",
+      "offset": 0
+    }
+  },
+  "cpu": {
+    "vcpus": [
+      {
+        "logicalId": 0,
+        "online": true,
+        "canOffline": false
+      },
+      {
+        "logicalId": 1,
+        "online": true,
+        "canOffline": true
+      }
+    ],
+    "stats": [
+      {
+        "type": "linux",
+        "cpu": 0,
+        "user": 10240,
+        "nice": 12,
+        "system": 4096,
+        "idle": 881920,
+        "iowait": 512,
+        "irq": 0,
+        "softirq": 64,
+        "steal": 8,
+        "guest": 0,
+        "guestnice": 0
+      },
+      {
+        "type": "linux",
+        "cpu": 1,
+        "user": 9984,
+        "nice": 3,
+        "system": 3968,
+        "idle": 883200,
+        "iowait": 480,
+        "irq": 0,
+        "softirq": 32,
+        "steal": 6,
+        "guest": 0,
+        "guestnice": 0
+      }
+    ],
+    "load": {
+      "load1": 0.08,
+      "load5": 0.03,
+      "load15": 0.01
+    }
+  },
+  "memory": {
+    "blocks": [
+      {
+        "physIndex": 0,
+        "online": true,
+        "canOffline": false
+      },
+      {
+        "physIndex": 1,
+        "online": true,
+        "canOffline": true
+      },
+      {
+        "physIndex": 2,
+        "online": true,
+        "canOffline": true
+      },
+      {
+        "physIndex": 3,
+        "online": true,
+        "canOffline": true
+      },
+      {
+        "physIndex": 4,
+        "online": true,
+        "canOffline": true
+      },
+      {
+        "physIndex": 5,
+        "online": true,
+        "canOffline": true
+      },
+      {
+        "physIndex": 6,
+        "online": true,
+        "canOffline": true
+      },
+      {
+        "physIndex": 7,
+        "online": true,
+        "canOffline": true
+      },
+      {
+        "physIndex": 32,
+        "online": false,
+        "canOffline": true
+      }
+    ]
+  },
+  "disks": {
+    "disks": [
+      {
+        "name": "/dev/vda1",
+        "partition": true,
+        "dependencies": [
+          "/dev/vda"
+        ]
+      },
+      {
+        "name": "/dev/vda2",
+        "partition": true,
+        "dependencies": [
+          "/dev/vda"
+        ]
+      },
+      {
+        "name": "/dev/vda",
+        "partition": false,
+        "address": {
+          "pciController": {
+            "domain": 0,
+            "bus": 7,
+            "slot": 0,
+            "function": 0
+          },
+          "busType": "virtio",
+          "bus": 0,
+          "target": 0,
+          "unit": 0,
+          "serial": "rootdisk",
+          "dev": "/dev/vda"
+        }
+      },
+      {
+        "name": "/dev/vdb",
+        "partition": false,
+        "address": {
+          "pciController": {
+            "domain": 0,
+            "bus": 8,
+            "slot": 0,
+            "function": 0
+          },
+          "busType": "virtio",
+          "bus": 0,
+          "target": 0,
+          "unit": 0,
+          "serial": "datadisk",
+          "dev": "/dev/vdb"
+        }
+      }
+    ],
+    "stats": [
+      {
+        "name": "vda",
+        "major": 252,
+        "minor": 0,
+        "stats": {
+          "readSectors": 1067416,
+          "readIos": 21318,
+          "readMerges": 4417,
+          "writeSectors": 360232,
+          "writeIos": 7341,
+          "writeMerges": 2311,
+          "discardSectors": 0,
+          "discardIos": 0,
+          "discardMerges": 0,
+          "flushIos": 1871,
+          "readTicks": 9472,
+          "writeTicks": 12640,
+          "discardTicks": 0,
+          "flushTicks": 1042,
+          "iosPending": 0,
+          "totalTicks": 15308,
+          "weightTicks": 23154
+        }
+      },
+      {
+        "name": "vdb",
+        "major": 252,
+        "minor": 16,
+        "stats": {
+          "readSectors": 2048,
+          "readIos": 64,
+          "writeSectors": 0,
+          "writeIos": 0,
+          "iosPending": 0
+        }
+      }
+    ],
+    "filesystems": [
+      {
+        "name": "vda2",
+        "mountpoint": "/",
+        "type": "xfs",
+        "usedBytes": 4473618432,
+        "totalBytes": 5267337216,
+        "totalBytesPrivileged": 5267337216,
+        "disk": [
+          {
+            "pciController": {
+              "domain": 0,
+              "bus": 7,
+              "slot": 0,
+              "function": 0
+            },
+            "busType": "virtio",
+            "bus": 0,
+            "target": 0,
+            "unit": 0,
+            "serial": "rootdisk",
+            "dev": "/dev/vda2"
+          }
+        ]
+      },
+      {
+        "name": "vda1",
+        "mountpoint": "/boot/efi",
+        "type": "vfat",
+        "usedBytes": 22591488,
+        "totalBytes": 104607744,
+        "disk": [
+          {
+            "pciController": {
+              "domain": 0,
+              "bus": 7,
+              "slot": 0,
+              "function": 0
+            },
+            "busType": "virtio",
+            "bus": 0,
+            "target": 0,
+            "unit": 0,
+            "serial": "rootdisk",
+            "dev": "/dev/vda1"
+          }
+        ]
+      }
+    ]
+  },
+  "network": {
+    "interfaces": [
+      {
+        "name": "lo",
+        "hardwareAddress": "00:00:00:00:00:00",
+        "ipAddresses": [
+          {
+            "ipAddress": "127.0.0.1",
+            "ipAddressType": "ipv4",
+            "prefix": 8
+          },
+          {
+            "ipAddress": "::1",
+            "ipAddressType": "ipv6",
+            "prefix": 128
+          }
+        ],
+        "statistics": {
+          "rxBytes": 4096,
+          "rxPackets": 48,
+          "rxErrs": 0,
+          "rxDropped": 0,
+          "txBytes": 4096,
+          "txPackets": 48,
+          "txErrs": 0,
+          "txDropped": 0
+        }
+      },
+      {
+        "name": "eth0",
+        "hardwareAddress": "02:5e:7a:00:00:01",
+        "ipAddresses": [
+          {
+            "ipAddress": "10.0.2.2",
+            "ipAddressType": "ipv4",
+            "prefix": 24
+          },
+          {
+            "ipAddress": "fe80::5e:7aff:fe00:1",
+            "ipAddressType": "ipv6",
+            "prefix": 64
+          }
+        ],
+        "statistics": {
+          "rxBytes": 18446744073709551000,
+          "rxPackets": 913027,
+          "rxErrs": 0,
+          "rxDropped": 2,
+          "txBytes": 30214876,
+          "txPackets": 201311,
+          "txErrs": 0,
+          "txDropped": 0
+        }
+      }
+    ],
+    "routes": [
+      {
+        "iface": "eth0",
+        "destination": "0.0.0.0",
+        "metric": 100,
+        "version": 4,
+        "gateway": "10.0.2.1",
+        "mask": "0.0.0.0",
+        "irtt": 0,
+        "flags": 3,
+        "refcnt": 0,
+        "use": 0,
+        "window": 0,
+        "mtu": 0
+      },
+      {
+        "iface": "eth0",
+        "destination": "10.0.2.0",
+        "metric": 100,
+        "version": 4,
+        "gateway": "0.0.0.0",
+        "mask": "255.255.255.0",
+        "irtt": 0,
+        "flags": 1,
+        "refcnt": 0,
+        "use": 0,
+        "window": 0,
+        "mtu": 0
+      },
+      {
+        "iface": "eth0",
+        "destination": "fe800000000000000000000000000000",
+        "metric": 256,
+        "version": 6,
+        "desprefixlen": "40",
+        "source": "00000000000000000000000000000000",
+        "srcprefixlen": "00",
+        "nexthop": "00000000000000000000000000000000"
+      }
+    ]
+  },
+  "users": {
+    "items": [
+      {
+        "user": "fedora",
+        "loginTime": 1795836000.125
+      }
+    ]
+  },
+  "sshkeys": {
+    "users": [
+      {
+        "username": "root",
+        "keys": [],
+        "reason": "AgentError",
+        "message": "guest agent command failed: unable to execute QEMU agent command 'guest-ssh-get-authorized-keys': failed to read '/root/.ssh/authorized_keys': Failed to open file “/root/.ssh/authorized_keys”: Permission denied"
+      },
+      {
+        "username": "fedora",
+        "keys": [
+          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHangarFixtureKeyNotARealKey000000000000000 user@example"
+        ]
+      }
+    ]
+  },
+  "time": {
+    "guestTime": "2026-11-28T04:00:00.250000Z",
+    "hostTime": "2026-11-28T04:00:00.000000Z",
+    "driftSeconds": 0.25
+  },
+  "errors": [
+    {
+      "section": "devices",
+      "command": "guest-get-devices",
+      "reason": "NotSupported",
+      "message": "this guest agent (qemu-ga 11.1.2) does not have guest-get-devices; it is not for this OS"
+    }
+  ],
+  "readAt": "2026-11-28T04:00:00Z"
+}

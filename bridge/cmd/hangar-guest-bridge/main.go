@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -15,7 +16,12 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 
+	"github.com/kalik1/hangar/bridge/internal/agent"
+	"github.com/kalik1/hangar/bridge/internal/apis/v1alpha1"
 	"github.com/kalik1/hangar/bridge/internal/app"
+	"github.com/kalik1/hangar/bridge/internal/guest"
+	"github.com/kalik1/hangar/bridge/internal/guestinfo"
+	"github.com/kalik1/hangar/bridge/internal/launcher"
 )
 
 // version is set at build time: -ldflags "-X main.version=v0.2.0".
@@ -32,6 +38,7 @@ func main() {
 		podName       = flag.String("pod-name", os.Getenv("POD_NAME"), "this pod's name")
 		peerTokenFile = flag.String("peer-token-file", app.DefaultPeerTokenFile, "projected ServiceAccount token of audience hangar-guest-bridge")
 		shutdownDelay = flag.Duration("shutdown-delay", 5*time.Second, "time to keep serving after SIGTERM, while /readyz fails")
+		podsDir       = flag.String("kubelet-pods-dir", launcher.DefaultPodsDir, "the kubelet's pods directory, mounted from the host read-only")
 		showVersion   = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
@@ -61,11 +68,28 @@ func main() {
 		PodName:       *podName,
 		PeerTokenFile: *peerTokenFile,
 		ShutdownDelay: *shutdownDelay,
+		Handlers:      handlers(*podsDir),
 	}); err != nil {
 		klog.ErrorS(err, "The guest bridge stopped")
 		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 	klog.Flush()
+}
+
+// handlers serves guestinfo through one libvirt connection per launcher pod
+// on this node. guestfiles answers 501 until it is implemented.
+func handlers(podsDir string) app.HandlersFunc {
+	return func(ctx context.Context, _ app.Env) (map[string]guest.Handler, error) {
+		dialer := &launcher.Dialer{PodsDir: podsDir}
+		pool := agent.NewPool(agent.PoolConfig{Dial: dialer.Dial})
+		go func() {
+			<-ctx.Done()
+			pool.Close()
+		}()
+		return map[string]guest.Handler{
+			v1alpha1.SubresourceGuestInfo: &guestinfo.Handler{VMs: pool},
+		}, nil
+	}
 }
 
 func envOr(name, def string) string {
