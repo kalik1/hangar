@@ -19,6 +19,15 @@ export function key(o: { metadata: { namespace?: string; name: string } }): stri
   return `${o.metadata.namespace ?? ''}/${o.metadata.name}`;
 }
 
+/**
+ * The VM a virt-launcher pod runs: its owner, the VMI, is named after the VM.
+ * The vm.kubevirt.io/name label holds the pod's hostname, which is the VM's
+ * spec.hostname when it sets one (KubeVirt v1.9.1 template.go:1738).
+ */
+export function launcherVmName(p: Obj): string | undefined {
+  return p.metadata.ownerReferences?.find(o => o.kind === 'VirtualMachineInstance')?.name ?? p.metadata.labels?.['vm.kubevirt.io/name'] ?? p.metadata.labels?.['kubevirt.io/domain'];
+}
+
 export function cond(o: Obj | null | undefined, type: string): Condition | undefined {
   return (o?.status?.conditions as Condition[] | undefined)?.find(c => c.type === type);
 }

@@ -14,7 +14,7 @@ export interface Meta {
   finalizers?: string[];
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
-  ownerReferences?: { kind: string; name: string; uid?: string; apiVersion?: string; controller?: boolean }[];
+  ownerReferences?: { kind: string; name: string; uid?: string; apiVersion?: string; controller?: boolean; blockOwnerDeletion?: boolean }[];
   generation?: number;
   /** Who wrote which field (src/model/ownership.ts). */
   managedFields?: ManagedFieldsEntry[];

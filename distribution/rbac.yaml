@@ -2,8 +2,10 @@
 # (namespace) with a RoleBinding, or cluster-wide with a ClusterRoleBinding.
 #
 #   hangar-viewer       sees VMs, hosts, datastores, networks, the library, events,
-#                       ServiceAccounts (the wizard's pick for k4all's metadata service)
-#   hangar-vm-operator  + power operations, consoles, migrations, snapshots
+#                       ServiceAccounts (the wizard's pick for k4all's metadata service),
+#                       published ports (Services, EndpointSlices, address pools)
+#   hangar-vm-operator  + power operations, consoles, migrations, snapshots,
+#                       publishing a VM's ports (Services)
 #   hangar-vm-admin     + creates, edits, clones and deletes VMs, disks, images;
 #                       creates the Secret of a VM whose cloud-init user data is
 #                       longer than KubeVirt takes inline (create only: no role
@@ -52,6 +54,21 @@ rules:
   - apiGroups: [metrics.k8s.io]
     resources: [pods, nodes]
     verbs: [get, list]
+  # Published ports: the Services that reach VMs, whether the VM is behind
+  # them (EndpointSlices), and the LoadBalancer address pools (MetalLB,
+  # Cilium LB IPAM) with their free addresses. No Secrets.
+  - apiGroups: ['']
+    resources: [services]
+    verbs: [get, list, watch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+  - apiGroups: [metallb.io]
+    resources: [ipaddresspools]
+    verbs: [get, list]
+  - apiGroups: [cilium.io]
+    resources: [ciliumloadbalancerippools]
+    verbs: [get, list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -90,6 +107,10 @@ rules:
   - apiGroups: [snapshot.kubevirt.io]
     resources: [virtualmachinesnapshots, virtualmachinerestores]
     verbs: [create, delete]
+  # Publish a VM's ports: its Services (owned by the VM, deleted with it).
+  - apiGroups: ['']
+    resources: [services]
+    verbs: [create, patch, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

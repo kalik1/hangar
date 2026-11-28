@@ -36,6 +36,29 @@ function nodeAgentObjects(): K8sObject[] {
 
 const key = (o: K8sObject) => `${o.kind} ${o.metadata.namespace ?? ''}/${o.metadata.name}`;
 
+/** The verbs a role grants on group/resource. */
+function verbs(role: string, group: string, resource: string): string[] {
+  const o = objects('rbac.yaml').find(x => x.metadata.name === role);
+  return (o?.rules ?? [])
+    .filter(r => (r.apiGroups ?? []).includes(group) && (r.resources ?? []).includes(resource))
+    .flatMap(r => r.verbs ?? [])
+    .sort();
+}
+
+describe('roles for published ports', () => {
+  it('the viewer reads Services, EndpointSlices, Events and the address pools', () => {
+    expect(verbs('hangar-viewer', '', 'services')).toEqual(['get', 'list', 'watch']);
+    expect(verbs('hangar-viewer', 'discovery.k8s.io', 'endpointslices')).toEqual(['get', 'list', 'watch']);
+    expect(verbs('hangar-viewer', '', 'events')).toEqual(['get', 'list', 'watch']);
+    expect(verbs('hangar-viewer', 'metallb.io', 'ipaddresspools')).toEqual(['get', 'list']);
+    expect(verbs('hangar-viewer', 'cilium.io', 'ciliumloadbalancerippools')).toEqual(['get', 'list']);
+  });
+  it('the VM operator creates, patches and deletes Services', () => {
+    expect(verbs('hangar-vm-operator-rules', '', 'services')).toEqual(['create', 'delete', 'patch']);
+  });
+  // Still no Secret read: 'roles and Secrets' below.
+});
+
 describe('cluster bundles', () => {
   const cluster = [...objects('rbac.yaml'), ...objects('protection-policy.yaml')];
 

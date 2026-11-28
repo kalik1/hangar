@@ -1,6 +1,7 @@
 /*
  * VM summary: guest, hardware, placement and policies, usage, notes, tags,
- * the VM's recent tasks; on k4all, its metadata service.
+ * where the VM is reachable (its published ports), the VM's recent tasks;
+ * on k4all, its metadata service.
  */
 
 import { Icon } from '@iconify/react';
@@ -41,6 +42,7 @@ import { useTokens } from '../../ui/useTokens';
 import { vmOs } from '../os';
 import { useVmDeviceRows } from './DevicesSection';
 import { MetadataPanel } from './MetadataPanel';
+import { ReachableCard } from './ReachableCard';
 
 /** The VM's extra devices in words (Configure → Devices, Shared folders). */
 function deviceWords(vm: Obj): string {
@@ -278,6 +280,7 @@ export function SummaryTab({ vm }: { vm: Obj }) {
             )}
           </Panel>
         )}
+        {!tpl && <ReachableCard vm={vm} />}
         <Panel title="Placement and policies" icon="mdi:map-marker-outline">
           <KV
             labelWidth={170}

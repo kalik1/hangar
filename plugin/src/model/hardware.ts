@@ -16,6 +16,7 @@
 import { clone } from './edit';
 import { Obj, VM } from './types';
 import { parseQuantity } from './units';
+import { launcherVmName } from './vm';
 import { slugify } from './vmspec';
 
 /* ------------------------------------------------------------ inventory */
@@ -125,6 +126,8 @@ export interface Inventory {
   vfioLoaded: boolean;
   /** Unix seconds of the agent's last vfio-pci bind. */
   lastBind: number | null;
+  /** firewalld runs on the host (published host ports need opening there); null from an agent that does not tell. */
+  firewalld: boolean | null;
   pci: PciDevice[];
   mdevs: MdevDevice[];
   usb: UsbDevice[];
@@ -144,6 +147,7 @@ export function parseInventory(text: string): Inventory {
     iommuGroups: typeof raw.iommuGroups === 'number' ? raw.iommuGroups : null,
     vfioLoaded: !!raw.vfioLoaded,
     lastBind: typeof raw.lastBind === 'number' ? raw.lastBind : null,
+    firewalld: typeof raw.firewalld === 'boolean' ? raw.firewalld : null,
     pci: arr(raw.pci).map((p: any) => ({ ...p, mdevTypes: arr(p.mdevTypes) })),
     mdevs: arr(raw.mdevs),
     usb: arr(raw.usb).map((u: any) => ({ ...u, interfaceClasses: arr(u.interfaceClasses), interfaceClassNames: arr(u.interfaceClassNames), drivers: arr(u.drivers) })),
@@ -529,7 +533,7 @@ export function availability(resourceName: string, nodes: Obj[], launchers: Obj[
       p => p.spec?.nodeName === n.metadata.name && !p.metadata.deletionTimestamp && ['Running', 'Pending'].includes(p.status?.phase) && podRequest(p, resourceName) > 0
     );
     const used = pods.reduce((s, p) => s + podRequest(p, resourceName), 0);
-    const vms = pods.map(p => `${p.metadata.namespace}/${p.metadata.labels?.['vm.kubevirt.io/name'] ?? p.metadata.labels?.['kubevirt.io/domain'] ?? p.metadata.name}`);
+    const vms = pods.map(p => `${p.metadata.namespace}/${launcherVmName(p) ?? p.metadata.name}`);
     if (total || used) out.push({ host: n.metadata.name, total, healthy, used, free: Math.max(0, healthy - used), vms });
   }
   return out;

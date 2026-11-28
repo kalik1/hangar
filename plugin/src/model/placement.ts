@@ -16,7 +16,7 @@ import { CLIPBOARD_NOT_LIVE_MIGRATABLE, CLIPBOARD_NOT_LIVE_WHY, clipboardOnVmi }
 import { storageKind } from './storage';
 import { Obj } from './types';
 import { formatBytes, parseQuantity } from './units';
-import { cond, disks, hardware, key } from './vm';
+import { cond, disks, hardware, key, launcherVmName } from './vm';
 
 /* ------------------------------------------------------------ node rules */
 
@@ -262,7 +262,7 @@ function isVmPodActive(p: Obj): boolean {
 }
 
 function podVmKey(p: Obj): string | undefined {
-  const n = p.metadata.labels?.['vm.kubevirt.io/name'] ?? p.metadata.labels?.['kubevirt.io/domain'];
+  const n = launcherVmName(p);
   return n ? `${p.metadata.namespace}/${n}` : undefined;
 }
 

@@ -91,6 +91,7 @@ FILENAME ~ /usb\.ids$/ {
 END {
   printf "{\"node\":%s,\"agent\":%s,\"generated\":%s,\"kernel\":%s,\"cmdline\":%s,", q(meta["node"]), q(meta["agent"]), q(meta["generated"]), q(meta["kernel"]), q(meta["cmdline"])
   printf "\"iommuGroups\":%s,\"vfioLoaded\":%s,\"lastBind\":%s,", num(meta["iommuGroups"]), bool(meta["vfio"]), num(meta["lastBind"])
+  printf "\"firewalld\":%s,", ("firewalld" in meta) ? bool(meta["firewalld"]) : "null"
 
   # mediated device types per parent
   for (i = 0; i < nm; i++) {
