@@ -98,9 +98,11 @@ history keeps growing, the tasks keep being followed.
     with a one-click change to VirtIO (at the next restart) for users who
     may patch the VM. noVNC keeps the extension private
     (`console/desktopSize.ts` is the one place that reaches into it), so
-    its own `resizeSession` stays off. The wizard gives desktop guests
-    (Windows; an image or installer named Workstation, Desktop, KDE…) the
-    VirtIO card where the `VideoConfig` gate is on.
+    its own `resizeSession` stays off. The wizard gives desktop guests (an
+    image or installer named Workstation, Desktop, KDE…) the VirtIO card
+    where the `VideoConfig` gate is on. Windows is offered the checkbox
+    unchecked (it needs viogpudo from virtio-win) until its lab test,
+    kalik1/hangar#19, passes (`WINDOWS_VIRTIO_VIDEO_DEFAULT`).
   - Clipboard sharing (Configure → Clipboard sharing, or the wizard's last
     step): a KubeVirt hook sidecar (feature gate `Sidecar`, KubeVirt's
     sidecar-shim image, a script in the ConfigMap `hangar-clipboard-hook`

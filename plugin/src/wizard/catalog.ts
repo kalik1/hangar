@@ -26,6 +26,13 @@ export interface OsChoice {
   desktop?: boolean;
 }
 
+/**
+ * Windows gets the VirtIO video card by default only once Windows with the
+ * viogpudo driver passes its lab test (kalik1/hangar#19): until then the
+ * wizard's checkbox is offered, unchecked.
+ */
+export const WINDOWS_VIRTIO_VIDEO_DEFAULT = false;
+
 export const OS_CHOICES: OsChoice[] = [
   { id: 'fedora', label: 'Fedora', icon: 'mdi:fedora', preferences: ['fedora'], firmware: 'bios', minMemGiB: 2, cloudInit: true },
   { id: 'ubuntu', label: 'Ubuntu', icon: 'mdi:ubuntu', preferences: ['ubuntu'], firmware: 'bios', minMemGiB: 2, cloudInit: true },
@@ -58,7 +65,7 @@ export const OS_CHOICES: OsChoice[] = [
     tpm: true,
     minMemGiB: 4,
     cloudInit: false,
-    desktop: true,
+    desktop: WINDOWS_VIRTIO_VIDEO_DEFAULT,
   },
   { id: 'cirros', label: 'CirrOS (test)', icon: 'mdi:linux', preferences: ['cirros'], firmware: 'bios', minMemGiB: 0.25, cloudInit: true },
   { id: 'linux', label: 'Other Linux', icon: 'mdi:linux', preferences: ['linux'], firmware: 'bios', minMemGiB: 1, cloudInit: true },
@@ -75,6 +82,15 @@ const DESKTOP_IMAGE = /(^|[^a-z])(workstation|desktop|gnome|kde|plasma|xfce|cinn
 /** An image or installer of a desktop OS, by its name ("Fedora-Workstation-Live", "ubuntu-24.04-desktop"). */
 export function isDesktopImage(...names: (string | undefined)[]): boolean {
   return names.some(n => !!n && DESKTOP_IMAGE.test(n) && !/server/i.test(n));
+}
+
+/**
+ * The wizard's default for the VirtIO video card: a desktop OS, or an image
+ * whose name says desktop; Windows only with WINDOWS_VIRTIO_VIDEO_DEFAULT.
+ */
+export function virtioVideoDefault(os: OsChoice, image?: Pick<LibraryImage, 'desktop'>): boolean {
+  if (os.id === 'windows') return WINDOWS_VIRTIO_VIDEO_DEFAULT;
+  return !!os.desktop || !!image?.desktop;
 }
 
 /** The first preference of the OS that the cluster has. */

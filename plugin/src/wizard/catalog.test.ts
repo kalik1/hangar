@@ -1,11 +1,18 @@
 import { buildVm, WizardInput } from '../model/vmspec';
-import { isDesktopImage, libraryImages, osChoice } from './catalog';
+import { isDesktopImage, libraryImages, osChoice, virtioVideoDefault, WINDOWS_VIRTIO_VIDEO_DEFAULT } from './catalog';
 
 describe('desktop guests (VirtIO video, hangar#4)', () => {
-  it('Windows is a desktop whatever the image', () => {
-    expect(osChoice('windows').desktop).toBe(true);
-    expect(osChoice('fedora').desktop).toBeFalsy();
-    expect(osChoice('other').desktop).toBeFalsy();
+  it('Windows keeps KubeVirt\'s card until its lab test (kalik1/hangar#19), whatever the image', () => {
+    expect(WINDOWS_VIRTIO_VIDEO_DEFAULT).toBe(false);
+    expect(virtioVideoDefault(osChoice('windows'))).toBe(false);
+    expect(virtioVideoDefault(osChoice('windows'), { desktop: true })).toBe(false);
+  });
+
+  it('a Linux desktop image gets the VirtIO card; a server or cloud image does not', () => {
+    expect(virtioVideoDefault(osChoice('fedora'), { desktop: true })).toBe(true);
+    expect(virtioVideoDefault(osChoice('fedora'), { desktop: false })).toBe(false);
+    expect(virtioVideoDefault(osChoice('ubuntu'))).toBe(false);
+    expect(virtioVideoDefault(osChoice('other'), { desktop: true })).toBe(true);
   });
 
   it('reads a desktop from the name of the image or installer', () => {

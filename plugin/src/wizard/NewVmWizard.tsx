@@ -68,7 +68,7 @@ import { K4allLink } from '../views/settings/K4allManaged';
 import { datastoreItems, renderDatastore } from '../views/storage/DatastorePick';
 import { confirmSidecarGate } from '../views/vm/ClipboardPanel';
 import { DnsFields, DnsResult } from '../views/vm/DnsPanel';
-import { libraryImages, OS_CHOICES, osChoice, preferenceFor, sizeProfiles } from './catalog';
+import { libraryImages, OS_CHOICES, osChoice, preferenceFor, sizeProfiles, virtioVideoDefault } from './catalog';
 import { GuestAgentOption } from './GuestAgentOption';
 
 export interface WizardPreset {
@@ -339,7 +339,7 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
   // A desktop guest gets the VirtIO card, so its desktop follows the console window (hangar#4).
   const videoGate = useGate('VideoConfig');
   const sourceImg = s.sourceKind === 'image' ? selectedImg : s.sourceKind === 'iso' ? imgs.find(i => `${i.namespace}/${i.name}` === s.iso) : undefined;
-  const virtioVideo = !s.headless && videoGate.on !== false && (s.virtioVideo ?? (videoGate.on === true && (!!os.desktop || !!sourceImg?.desktop)));
+  const virtioVideo = !s.headless && videoGate.on !== false && (s.virtioVideo ?? (videoGate.on === true && virtioVideoDefault(os, sourceImg)));
   const minRoot = s.sourceKind === 'image' && selectedImg ? Math.max(1, Math.ceil(selectedImg.sizeBytes / GiB)) : 1;
   const flavorList = useFlavorFamilies(s.folder).all;
   const chosenFlavor = flavorList.find(o => o.metadata.name === s.profile && (s.profileKind === KIND_NS ? o.metadata.namespace === s.folder : !o.metadata.namespace));
@@ -1061,7 +1061,7 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
                   <GateHint gate="VideoConfig" sx={{ ml: 4, mt: -0.5 }} />
                 ) : (
                   <Typography sx={{ fontSize: 12.5, color: t.muted, ml: 4, mt: -0.5 }}>
-                    On for desktops. Linux needs the virtio-gpu driver and a desktop that follows the display (GNOME, KDE on Wayland); Windows the VirtIO GPU driver (viogpudo).
+                    On for Linux desktops: they need the virtio-gpu driver and a desktop that follows the display (GNOME, KDE on Wayland). Windows needs the viogpudo driver from virtio-win.
                   </Typography>
                 )}
               </Box>
