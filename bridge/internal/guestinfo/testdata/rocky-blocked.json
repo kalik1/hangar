@@ -1,0 +1,573 @@
+{
+  "replies": {
+    "guest-get-cpustats": {
+      "return": [
+        {
+          "type": "linux",
+          "cpu": 0,
+          "user": 10240,
+          "nice": 12,
+          "system": 4096,
+          "idle": 881920,
+          "iowait": 512,
+          "irq": 0,
+          "softirq": 64,
+          "steal": 8,
+          "guest": 0,
+          "guestnice": 0
+        },
+        {
+          "type": "linux",
+          "cpu": 1,
+          "user": 9984,
+          "nice": 3,
+          "system": 3968,
+          "idle": 883200,
+          "iowait": 480,
+          "irq": 0,
+          "softirq": 32,
+          "steal": 6,
+          "guest": 0,
+          "guestnice": 0
+        }
+      ]
+    },
+    "guest-get-disks": {
+      "return": [
+        {
+          "name": "/dev/vda1",
+          "partition": true,
+          "dependencies": [
+            "/dev/vda"
+          ]
+        },
+        {
+          "name": "/dev/vda2",
+          "partition": true,
+          "dependencies": [
+            "/dev/vda"
+          ]
+        },
+        {
+          "name": "/dev/vda",
+          "partition": false,
+          "address": {
+            "pci-controller": {
+              "domain": 0,
+              "bus": 7,
+              "slot": 0,
+              "function": 0
+            },
+            "bus-type": "virtio",
+            "bus": 0,
+            "target": 0,
+            "unit": 0,
+            "serial": "rootdisk",
+            "dev": "/dev/vda"
+          }
+        },
+        {
+          "name": "/dev/vdb",
+          "partition": false,
+          "address": {
+            "pci-controller": {
+              "domain": 0,
+              "bus": 8,
+              "slot": 0,
+              "function": 0
+            },
+            "bus-type": "virtio",
+            "bus": 0,
+            "target": 0,
+            "unit": 0,
+            "serial": "datadisk",
+            "dev": "/dev/vdb"
+          }
+        }
+      ]
+    },
+    "guest-get-diskstats": {
+      "return": [
+        {
+          "name": "vda",
+          "major": 252,
+          "minor": 0,
+          "stats": {
+            "read-sectors": 1067416,
+            "read-ios": 21318,
+            "read-merges": 4417,
+            "write-sectors": 360232,
+            "write-ios": 7341,
+            "write-merges": 2311,
+            "discard-sectors": 0,
+            "discard-ios": 0,
+            "discard-merges": 0,
+            "flush-ios": 1871,
+            "read-ticks": 9472,
+            "write-ticks": 12640,
+            "discard-ticks": 0,
+            "flush-ticks": 1042,
+            "ios-pending": 0,
+            "total-ticks": 15308,
+            "weight-ticks": 23154
+          }
+        },
+        {
+          "name": "vdb",
+          "major": 252,
+          "minor": 16,
+          "stats": {
+            "read-sectors": 2048,
+            "read-ios": 64,
+            "write-sectors": 0,
+            "write-ios": 0,
+            "ios-pending": 0
+          }
+        }
+      ]
+    },
+    "guest-get-fsinfo": {
+      "return": [
+        {
+          "name": "vda2",
+          "mountpoint": "/",
+          "type": "xfs",
+          "used-bytes": 4473618432,
+          "total-bytes": 5267337216,
+          "total-bytes-privileged": 5267337216,
+          "disk": [
+            {
+              "pci-controller": {
+                "domain": 0,
+                "bus": 7,
+                "slot": 0,
+                "function": 0
+              },
+              "bus-type": "virtio",
+              "bus": 0,
+              "target": 0,
+              "unit": 0,
+              "serial": "rootdisk",
+              "dev": "/dev/vda2"
+            }
+          ]
+        },
+        {
+          "name": "vda1",
+          "mountpoint": "/boot/efi",
+          "type": "vfat",
+          "used-bytes": 22591488,
+          "total-bytes": 104607744,
+          "disk": [
+            {
+              "pci-controller": {
+                "domain": 0,
+                "bus": 7,
+                "slot": 0,
+                "function": 0
+              },
+              "bus-type": "virtio",
+              "bus": 0,
+              "target": 0,
+              "unit": 0,
+              "serial": "rootdisk",
+              "dev": "/dev/vda1"
+            }
+          ]
+        }
+      ]
+    },
+    "guest-get-host-name": {
+      "return": {
+        "host-name": "rocky"
+      }
+    },
+    "guest-get-load": {
+      "return": {
+        "load1": 0.08,
+        "load5": 0.03,
+        "load15": 0.01
+      }
+    },
+    "guest-get-memory-blocks": {
+      "return": [
+        {
+          "phys-index": 0,
+          "online": true,
+          "can-offline": false
+        },
+        {
+          "phys-index": 1,
+          "online": true,
+          "can-offline": true
+        },
+        {
+          "phys-index": 2,
+          "online": true,
+          "can-offline": true
+        },
+        {
+          "phys-index": 3,
+          "online": true,
+          "can-offline": true
+        },
+        {
+          "phys-index": 4,
+          "online": true,
+          "can-offline": true
+        },
+        {
+          "phys-index": 5,
+          "online": true,
+          "can-offline": true
+        },
+        {
+          "phys-index": 6,
+          "online": true,
+          "can-offline": true
+        },
+        {
+          "phys-index": 7,
+          "online": true,
+          "can-offline": true
+        },
+        {
+          "phys-index": 32,
+          "online": false,
+          "can-offline": true
+        }
+      ]
+    },
+    "guest-get-osinfo": {
+      "return": {
+        "name": "Rocky Linux",
+        "kernel-release": "5.14.0-611.5.1.el9_9.x86_64",
+        "version": "9.9 (Blue Onyx)",
+        "pretty-name": "Rocky Linux 9.9 (Blue Onyx)",
+        "version-id": "9.9",
+        "kernel-version": "#1 SMP PREEMPT_DYNAMIC Tue Nov 10 12:00:00 UTC 2026",
+        "machine": "x86_64",
+        "id": "rocky"
+      }
+    },
+    "guest-get-time": {
+      "return": 1795838400250000000
+    },
+    "guest-get-timezone": {
+      "return": {
+        "zone": "UTC",
+        "offset": 0
+      }
+    },
+    "guest-get-users": {
+      "libvirtError": {
+        "code": 113,
+        "message": "guest agent command failed: unable to execute QEMU agent command 'guest-get-users': Command guest-get-users has been disabled: the command is not allowed"
+      }
+    },
+    "guest-get-vcpus": {
+      "return": [
+        {
+          "logical-id": 0,
+          "online": true,
+          "can-offline": false
+        },
+        {
+          "logical-id": 1,
+          "online": true,
+          "can-offline": true
+        }
+      ]
+    },
+    "guest-info": {
+      "return": {
+        "version": "10.1.0",
+        "supported_commands": [
+          {
+            "enabled": false,
+            "name": "guest-exec",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-exec-status",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-file-close",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-file-flush",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-file-open",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-file-read",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-file-seek",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-file-write",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-fsfreeze-freeze",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-fsfreeze-freeze-list",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-fsfreeze-status",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-fsfreeze-thaw",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-fstrim",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-cpustats",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-disks",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-diskstats",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-fsinfo",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-host-name",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-load",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-memory-block-info",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-memory-blocks",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-osinfo",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-time",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-timezone",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-get-users",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-vcpus",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-info",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-network-get-interfaces",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-network-get-route",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-ping",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-set-memory-blocks",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-set-time",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-set-user-password",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-set-vcpus",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-shutdown",
+            "success-response": false
+          },
+          {
+            "enabled": true,
+            "name": "guest-ssh-add-authorized-keys",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-ssh-get-authorized-keys",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-ssh-remove-authorized-keys",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-suspend-disk",
+            "success-response": false
+          },
+          {
+            "enabled": true,
+            "name": "guest-suspend-hybrid",
+            "success-response": false
+          },
+          {
+            "enabled": true,
+            "name": "guest-suspend-ram",
+            "success-response": false
+          },
+          {
+            "enabled": true,
+            "name": "guest-sync",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-sync-delimited",
+            "success-response": true
+          }
+        ]
+      }
+    },
+    "guest-network-get-interfaces": {
+      "return": [
+        {
+          "name": "lo",
+          "hardware-address": "00:00:00:00:00:00",
+          "ip-addresses": [
+            {
+              "ip-address-type": "ipv4",
+              "ip-address": "127.0.0.1",
+              "prefix": 8
+            },
+            {
+              "ip-address-type": "ipv6",
+              "ip-address": "::1",
+              "prefix": 128
+            }
+          ],
+          "statistics": {
+            "rx-bytes": 4096,
+            "rx-packets": 48,
+            "rx-errs": 0,
+            "rx-dropped": 0,
+            "tx-bytes": 4096,
+            "tx-packets": 48,
+            "tx-errs": 0,
+            "tx-dropped": 0
+          }
+        },
+        {
+          "name": "eth0",
+          "hardware-address": "02:5e:7a:00:00:01",
+          "ip-addresses": [
+            {
+              "ip-address-type": "ipv4",
+              "ip-address": "10.0.2.2",
+              "prefix": 24
+            },
+            {
+              "ip-address-type": "ipv6",
+              "ip-address": "fe80::5e:7aff:fe00:1",
+              "prefix": 64
+            }
+          ],
+          "statistics": {
+            "rx-bytes": 18446744073709551000,
+            "rx-packets": 913027,
+            "rx-errs": 0,
+            "rx-dropped": 2,
+            "tx-bytes": 30214876,
+            "tx-packets": 201311,
+            "tx-errs": 0,
+            "tx-dropped": 0
+          }
+        }
+      ]
+    },
+    "guest-network-get-route": {
+      "libvirtError": {
+        "code": 113,
+        "message": "guest agent command failed: unable to execute QEMU agent command 'guest-network-get-route': Command guest-network-get-route has been disabled: the command is not allowed"
+      }
+    },
+    "guest-ssh-get-authorized-keys root": {
+      "libvirtError": {
+        "code": 113,
+        "message": "guest agent command failed: unable to execute QEMU agent command 'guest-ssh-get-authorized-keys': Command guest-ssh-get-authorized-keys has been disabled: the command is not allowed"
+      }
+    }
+  }
+}
