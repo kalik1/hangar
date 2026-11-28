@@ -27,7 +27,7 @@ import { Help, Later, NotInKubevirt, quiet, Row, saveVm } from './configParts';
 
 const VIDEO: { value: O.VideoType; label: string }[] = [
   { value: '', label: 'Default (VGA; Bochs with UEFI)' },
-  { value: 'virtio', label: 'VirtIO GPU' },
+  { value: 'virtio', label: 'VirtIO GPU: resizes with the console window' },
   { value: 'vga', label: 'Standard VGA' },
   { value: 'bochs', label: 'Bochs' },
   { value: 'ramfb', label: 'ramfb (boot framebuffer)' },
@@ -108,7 +108,13 @@ export function DevicesPanel({ vm }: { vm: Obj }) {
         {o.graphics && (
           <Box sx={{ mt: 1 }}>
             <GatedSelect label="Video card" value={o.video} options={VIDEO} gate={video} onChange={v => set('Change video card', { video: v })} />
-            {video.on === false && !o.video && <GateHint gate="VideoConfig" sx={{ mt: 0.5 }} />}
+            {video.on === false && !o.video ? (
+              <GateHint gate="VideoConfig" sx={{ mt: 0.5 }} />
+            ) : o.video === 'virtio' ? (
+              <Help>The desktop takes the size of the console window (Linux with virtio-gpu and a desktop that follows the display, Windows with the VirtIO GPU driver).</Help>
+            ) : (
+              <Help>Keeps the resolution the guest sets: the console scales it. With VirtIO the desktop resizes with the console window.</Help>
+            )}
           </Box>
         )}
         <NotInKubevirt>SPICE is not in KubeVirt: consoles are VNC and serial.</NotInKubevirt>

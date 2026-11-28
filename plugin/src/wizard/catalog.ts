@@ -17,7 +17,21 @@ export interface OsChoice {
   /** Smallest sensible memory. */
   minMemGiB: number;
   cloudInit: boolean;
+  /**
+   * A desktop OS whatever the image: the wizard gives it the VirtIO video
+   * card, so its desktop follows the console window (hangar#4). Another OS
+   * gets it when its image's name says desktop (LibraryImage.desktop);
+   * servers and cloud images keep KubeVirt's default card.
+   */
+  desktop?: boolean;
 }
+
+/**
+ * Windows gets the VirtIO video card by default only once Windows with the
+ * viogpudo driver passes its lab test (kalik1/hangar#19): until then the
+ * wizard's checkbox is offered, unchecked.
+ */
+export const WINDOWS_VIRTIO_VIDEO_DEFAULT = false;
 
 export const OS_CHOICES: OsChoice[] = [
   { id: 'fedora', label: 'Fedora', icon: 'mdi:fedora', preferences: ['fedora'], firmware: 'bios', minMemGiB: 2, cloudInit: true },
@@ -51,6 +65,7 @@ export const OS_CHOICES: OsChoice[] = [
     tpm: true,
     minMemGiB: 4,
     cloudInit: false,
+    desktop: WINDOWS_VIRTIO_VIDEO_DEFAULT,
   },
   { id: 'cirros', label: 'CirrOS (test)', icon: 'mdi:linux', preferences: ['cirros'], firmware: 'bios', minMemGiB: 0.25, cloudInit: true },
   { id: 'linux', label: 'Other Linux', icon: 'mdi:linux', preferences: ['linux'], firmware: 'bios', minMemGiB: 1, cloudInit: true },
@@ -59,6 +74,23 @@ export const OS_CHOICES: OsChoice[] = [
 
 export function osChoice(id?: string): OsChoice {
   return OS_CHOICES.find(o => o.id === id) ?? OS_CHOICES[OS_CHOICES.length - 1];
+}
+
+/** Names of desktop images and installers: Fedora Workstation, Ubuntu Desktop, the KDE spins… */
+const DESKTOP_IMAGE = /(^|[^a-z])(workstation|desktop|gnome|kde|plasma|xfce|cinnamon|lxqt|mate)([^a-z]|$)/i;
+
+/** An image or installer of a desktop OS, by its name ("Fedora-Workstation-Live", "ubuntu-24.04-desktop"). */
+export function isDesktopImage(...names: (string | undefined)[]): boolean {
+  return names.some(n => !!n && DESKTOP_IMAGE.test(n) && !/server/i.test(n));
+}
+
+/**
+ * The wizard's default for the VirtIO video card: a desktop OS, or an image
+ * whose name says desktop; Windows only with WINDOWS_VIRTIO_VIDEO_DEFAULT.
+ */
+export function virtioVideoDefault(os: OsChoice, image?: Pick<LibraryImage, 'desktop'>): boolean {
+  if (os.id === 'windows') return WINDOWS_VIRTIO_VIDEO_DEFAULT;
+  return !!os.desktop || !!image?.desktop;
 }
 
 /** The first preference of the OS that the cluster has. */
@@ -105,6 +137,8 @@ export interface LibraryImage {
   sizeBytes: number;
   ready: boolean;
   progress?: string;
+  /** Its name says it has a desktop (isDesktopImage). */
+  desktop: boolean;
 }
 
 export function libraryImages(dvs: Obj[], pvcs: Obj[], libraryNs: string): LibraryImage[] {
@@ -116,15 +150,17 @@ export function libraryImages(dvs: Obj[], pvcs: Obj[], libraryNs: string): Libra
     seen.add(k);
     const pvc = pvcs.find(p => p.metadata.namespace === o.metadata.namespace && p.metadata.name === o.metadata.name);
     const a = o.metadata.annotations ?? {};
+    const displayName = a['hangar.magesgate.com/display-name'] || o.metadata.name;
     out.push({
       namespace: o.metadata.namespace as string,
       name: o.metadata.name,
-      displayName: a['hangar.magesgate.com/display-name'] || o.metadata.name,
+      displayName,
       os: a['hangar.magesgate.com/os'],
       media: a['hangar.magesgate.com/media'] === 'iso' || /iso/i.test(o.metadata.name) ? 'iso' : 'disk',
       sizeBytes: parseQuantity(pvc?.status?.capacity?.storage ?? pvc?.spec?.resources?.requests?.storage ?? o.spec?.storage?.resources?.requests?.storage),
       ready,
       progress,
+      desktop: isDesktopImage(displayName, o.metadata.name),
     });
   };
   for (const dv of dvs) {
