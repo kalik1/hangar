@@ -152,7 +152,16 @@ history keeps growing, the tasks keep being followed.
   with what an image's default user has (sudo without a password, bash
   where the OS has it), its password and SSH keys; with the user field
   empty the image's own default user gets them. Ubuntu and Debian images
-  lack the QEMU guest agent: `packages` installs it. KubeVirt refuses
+  lack the QEMU guest agent: `packages` installs it. "Let the guest agent
+  reach the whole guest" (off by default, not with an own cloud-config,
+  `GUEST_AGENT_FULL_ACCESS`) adds, at first boot, a systemd drop-in with an
+  empty `FILTER_RPC_ARGS` (every agent command on RHEL and Rocky), a CIL
+  module where SELinux is on (`virt_qemu_ga_t` in `files_unconfined_type`
+  with chown, fowner and fsetid: every file, the domain stays enforcing)
+  and a restart of the agent, merged into the same `packages`,
+  `write_files` and `runcmd` keys; the wizard states the trade-off
+  (anyone with `hangar-guest-admin` on the VM can change every file as
+  root). KubeVirt refuses
   inline user data over 2,048 bytes (`cloudInitUserMaxLen`): `createVm`
   (`api/cloudInit.ts`) keeps longer user data in a Secret of the VM's
   folder (`cloudInitNoCloud.secretRef`, key `userdata`) and refuses with

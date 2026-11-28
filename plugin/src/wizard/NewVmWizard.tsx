@@ -67,6 +67,7 @@ import { datastoreItems, renderDatastore } from '../views/storage/DatastorePick'
 import { confirmSidecarGate } from '../views/vm/ClipboardPanel';
 import { DnsFields, DnsResult } from '../views/vm/DnsPanel';
 import { libraryImages, OS_CHOICES, osChoice, preferenceFor, sizeProfiles } from './catalog';
+import { GuestAgentOption } from './GuestAgentOption';
 
 export interface WizardPreset {
   folder?: string;
@@ -114,6 +115,8 @@ interface State {
   ciKeys: string;
   ciCustom: string;
   ciMode: 'simple' | 'custom';
+  /** Let the guest agent reach the whole guest (model/vmspec.ts GUEST_AGENT_FULL_ACCESS). */
+  ciAgentFull: boolean;
   powerOn: boolean;
   runStrategy: string;
   eviction: string;
@@ -285,6 +288,7 @@ function initialState(d: HangarData, preset: WizardPreset, libraryNs: string): S
     ciKeys: '',
     ciCustom: '',
     ciMode: 'simple',
+    ciAgentFull: false,
     powerOn: true,
     runStrategy: 'Always',
     eviction: '',
@@ -431,7 +435,13 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
       cloudInit: useCloudInit
         ? s.ciMode === 'custom'
           ? { custom: s.ciCustom }
-          : { user: s.ciUser.trim() || undefined, password: s.ciPassword || undefined, sshKeys: s.ciKeys.split('\n'), hostname: s.name }
+          : {
+              user: s.ciUser.trim() || undefined,
+              password: s.ciPassword || undefined,
+              sshKeys: s.ciKeys.split('\n'),
+              hostname: s.name,
+              guestAgentFullAccess: s.ciAgentFull || undefined,
+            }
         : undefined,
       runStrategy: s.powerOn || s.runStrategy === 'Manual' ? s.runStrategy : 'Halted',
       evictionStrategy: s.eviction || undefined,
@@ -953,6 +963,9 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
                     <TextField fullWidth multiline minRows={10} size="small" value={s.ciCustom} onChange={e => set({ ciCustom: e.target.value })} placeholder={'#cloud-config\n'} inputProps={{ 'aria-label': 'cloud-config', style: { fontFamily: t.font.mono, fontSize: 13 } }} />
                   </Field>
                 )}
+                <Field label="Guest agent" help="For the Guest and Files tabs.">
+                  <GuestAgentOption custom={s.ciMode === 'custom'} checked={s.ciAgentFull} onChange={v => set({ ciAgentFull: v })} />
+                </Field>
               </>
             )}
             {metadataFields}
@@ -993,7 +1006,11 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
                 [
                   'Customization',
                   useCloudInit
-                    ? (s.ciMode === 'custom' ? 'Your cloud-config' : `User ${s.ciUser.trim() || '(image default)'}${s.ciKeys.trim() ? ', SSH keys' : ''}${s.ciPassword ? ', password' : ''}`) +
+                    ? (s.ciMode === 'custom'
+                        ? 'Your cloud-config'
+                        : `User ${s.ciUser.trim() || '(image default)'}${s.ciKeys.trim() ? ', SSH keys' : ''}${s.ciPassword ? ', password' : ''}${
+                            s.ciAgentFull ? ', the guest agent reaches the whole guest' : ''
+                          }`) +
                       (ciOverflow ? `; ${ciOverflow.bytes.toLocaleString('en-US')} bytes, kept in a Secret (KubeVirt takes ${CLOUD_INIT_INLINE_MAX.toLocaleString('en-US')} inline)` : '')
                     : 'None',
                 ],

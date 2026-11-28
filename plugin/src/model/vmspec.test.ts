@@ -14,6 +14,7 @@ import {
   nameProblem,
   slugify,
   userNameProblem,
+  utf8Bytes,
   withCloudInitSecret,
   withHostname,
   withoutVolumes,
@@ -218,6 +219,87 @@ describe('cloudInitUserData (hangar#7)', () => {
     const ud = (osId?: string) => buildVm({ ...base, osId, cloudInit: { user: 'k4all' } }).spec.template.spec.volumes.find((v: any) => v.name === 'cloudinitdisk').cloudInitNoCloud.userData;
     expect(ud('ubuntu')).toContain('packages: [qemu-guest-agent]');
     expect(ud('fedora')).not.toContain('packages:');
+  });
+});
+
+describe('cloudInitUserData: let the guest agent reach the whole guest (hangar#15)', () => {
+  // The block of the ticket, verbatim (tested in the lab on 2026-11-28).
+  const BLOCK = String.raw`packages: [qemu-guest-agent]
+write_files:
+  - path: /etc/systemd/system/qemu-guest-agent.service.d/50-hangar.conf
+    content: "[Service]\nEnvironmentFile=-/etc/hangar/qemu-ga.env\n"
+  - path: /etc/hangar/qemu-ga.env
+    content: "FILTER_RPC_ARGS=\n"
+  - path: /etc/hangar/hangar_qemu_ga.cil
+    content: "(typeattributeset files_unconfined_type (virt_qemu_ga_t))\n(allow virt_qemu_ga_t self (capability (chown fowner fsetid)))\n"
+runcmd:
+  - [sh, -c, "if command -v selinuxenabled >/dev/null && selinuxenabled; then semodule -i /etc/hangar/hangar_qemu_ga.cil; fi"]
+  - [sh, -c, "systemctl daemon-reload; systemctl enable qemu-guest-agent; systemctl restart qemu-guest-agent"]
+  - [sh, -c, "systemctl enable --now qemu-guest-agent || rc-update add qemu-guest-agent default || true"]
+`;
+  const KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample me@laptop';
+  const form = { user: 'k4all', password: 's3cret', sshKeys: [KEY] };
+  const head = (shell: boolean) =>
+    [
+      '#cloud-config',
+      'hostname: web-03',
+      'users:',
+      '  - name: k4all',
+      '    sudo: "ALL=(ALL) NOPASSWD:ALL"',
+      ...(shell ? ['    shell: /bin/bash'] : []),
+      '    lock_passwd: false',
+      '    plain_text_passwd: "s3cret"',
+      '    ssh_authorized_keys:',
+      `      - "${KEY}"`,
+      'ssh_pwauth: true',
+      '',
+    ].join('\n');
+  const LAST = '  - [sh, -c, "systemctl enable --now qemu-guest-agent || rc-update add qemu-guest-agent default || true"]\n';
+
+  it('with the option: the user block, then the block of the ticket line for line, on every OS', () => {
+    for (const os of ['fedora', 'rhel', 'centos', 'ubuntu', 'debian']) expect(cloudInitUserData({ ...form, guestAgentFullAccess: true }, 'web-03', os)).toBe(head(true) + BLOCK);
+    expect(cloudInitUserData({ ...form, guestAgentFullAccess: true }, 'web-03', 'alpine')).toBe(head(false) + BLOCK);
+  });
+
+  it('without it: no write_files, one runcmd item; packages only where the agent is missing', () => {
+    expect(cloudInitUserData(form, 'web-03', 'fedora')).toBe(head(true) + 'runcmd:\n' + LAST);
+    expect(cloudInitUserData(form, 'web-03', 'rhel')).toBe(head(true) + 'runcmd:\n' + LAST);
+    expect(cloudInitUserData(form, 'web-03', 'ubuntu')).toBe(head(true) + 'packages: [qemu-guest-agent]\nruncmd:\n' + LAST);
+    expect(cloudInitUserData(form, 'web-03', 'debian')).toBe(head(true) + 'packages: [qemu-guest-agent]\nruncmd:\n' + LAST);
+  });
+
+  it('merges into one packages, one write_files and one runcmd key; the existing runcmd item stays last', () => {
+    for (const os of ['fedora', 'ubuntu', 'debian', undefined]) {
+      for (const sshKeys of [[KEY], []]) {
+        const u = cloudInitUserData({ ...form, sshKeys, guestAgentFullAccess: true }, 'h', os);
+        expect(u.match(/^packages:/gm)).toHaveLength(1);
+        expect(u.match(/^write_files:/gm)).toHaveLength(1);
+        expect(u.match(/^runcmd:/gm)).toHaveLength(1);
+        expect(u.endsWith(LAST)).toBe(true);
+        if (sshKeys.length) expect(u.indexOf('packages:')).toBeGreaterThan(u.indexOf('ssh_authorized_keys:'));
+      }
+    }
+    // The image's default user (no user): the same block after the top-level keys.
+    const d = cloudInitUserData({ sshKeys: [KEY], guestAgentFullAccess: true }, 'h', 'ubuntu');
+    expect(d.match(/^packages:/gm)).toHaveLength(1);
+    expect(d.endsWith(BLOCK)).toBe(true);
+  });
+
+  it('adds 669 bytes where the agent needs no package (Fedora), as measured in the lab', () => {
+    expect(utf8Bytes(cloudInitUserData({ ...form, guestAgentFullAccess: true }, 'web-03', 'fedora')) - utf8Bytes(cloudInitUserData(form, 'web-03', 'fedora'))).toBe(669);
+  });
+
+  it('custom user data stays unchanged: the option does not apply to it', () => {
+    expect(cloudInitUserData({ custom: '#cloud-config\n', guestAgentFullAccess: true }, 'h', 'fedora')).toBe('#cloud-config\n');
+  });
+
+  it('buildVm passes the option through, and the guard applies (with many keys the user data goes into a Secret)', () => {
+    const keys = Array.from({ length: 3 }, (_, i) => `ssh-rsa ${'A'.repeat(716)}${i} me@laptop`);
+    const vm = buildVm({ ...base, osId: 'fedora', cloudInit: { user: 'k4all', sshKeys: keys, guestAgentFullAccess: true } });
+    const ci = vm.spec.template.spec.volumes.find((v: any) => v.name === 'cloudinitdisk').cloudInitNoCloud;
+    expect(ci.userData).toContain('write_files:');
+    expect(cloudInitOverflow(vm)).toHaveLength(1);
+    expect(cloudInitOverflow(buildVm({ ...base, osId: 'fedora', cloudInit: { user: 'k4all', sshKeys: [KEY], guestAgentFullAccess: true } }))).toEqual([]);
   });
 });
 
