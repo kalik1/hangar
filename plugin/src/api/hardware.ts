@@ -29,7 +29,10 @@ import { tasks, TaskTarget } from '../model/tasks';
 import { Obj, VM } from '../model/types';
 import { updateVm } from './actions';
 import { errorText, kdelete, kmerge, kpost, kreq } from './client';
+import { keepWritten } from './kubevirtCopy';
 import { PATHS } from './resources';
+
+export { useKubevirt } from './kubevirtCopy';
 
 export const AGENT_NS = 'hangar-system';
 export const AGENT_SELECTOR = 'app.kubernetes.io/name=hangar-node-agent';
@@ -189,24 +192,6 @@ async function nudgeAgent(host: string) {
 
 /* ------------------------------------------------------------ KubeVirt */
 
-let written: { obj: Obj; at: number } | null = null;
-
-/** The KubeVirt CR: the list's copy, or the one Hangar just wrote if the list has not caught up. */
-export function useKubevirt(listed: Obj | null): Obj | null {
-  const [, force] = React.useReducer((x: number) => x + 1, 0);
-  React.useEffect(() => {
-    kvListeners.add(force);
-    return () => {
-      kvListeners.delete(force);
-    };
-  }, []);
-  if (written && Date.now() - written.at < 120000 && listed?.metadata.resourceVersion !== written.obj.metadata.resourceVersion) {
-    if (!listed || listed.metadata.generation === undefined || (written.obj.metadata.generation ?? 0) >= (listed.metadata.generation ?? 0)) return written.obj;
-  }
-  return listed;
-}
-const kvListeners = new Set<() => void>();
-
 async function updateKubevirt(kv: Obj, change: (fresh: Obj) => Obj): Promise<Obj> {
   const ns = kv.metadata.namespace as string;
   const name = kv.metadata.name;
@@ -215,8 +200,7 @@ async function updateKubevirt(kv: Obj, change: (fresh: Obj) => Obj): Promise<Obj
     const next = change(fresh);
     try {
       const out = await kreq<Obj>(P.kubevirt(ns, name), { method: 'PUT', body: { ...next, status: undefined } });
-      written = { obj: out, at: Date.now() };
-      kvListeners.forEach(l => l());
+      keepWritten(out);
       return out;
     } catch (e: any) {
       if (e?.status !== 409 || attempt === 2) throw e;

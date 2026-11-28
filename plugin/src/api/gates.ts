@@ -3,7 +3,9 @@
  * disabledFeatureGates lists of the KubeVirt resource, read fresh and
  * written with its resourceVersion), and whether the user may. On k4all the
  * gates its ClusterConfig lists are its own (read-only, model/gates.ts
- * k4allKubevirt); k4all keeps the others Hangar sets (union, D2).
+ * k4allKubevirt); k4all keeps the others Hangar sets (union, D2). A write
+ * keeps the object it returned (api/kubevirtCopy.ts), so the new state shows
+ * before the polled list has it.
  */
 
 import React from 'react';
@@ -13,13 +15,26 @@ import { runTask } from './actions';
 import { kmerge, kreq } from './client';
 import { useHangar } from './data';
 import { isK4all } from './k4all';
+import { keepWritten, useKubevirt } from './kubevirtCopy';
 import { useCan } from './permissions';
 
 /** The API path of the KubeVirt resource, for a GET or a write. */
 export const kubevirtPath = (kv: Obj) => `/apis/kubevirt.io/v1/namespaces/${kv.metadata.namespace}/kubevirts/${kv.metadata.name}`;
 
-/** Turns a gate on or off; other gates stay. Retries when the resource changed meanwhile. */
-export function setFeatureGate(kv: Obj, name: string, on: boolean) {
+/** A gate Hangar may not change because k4all's ClusterConfig lists it. */
+export class K4allGateError extends Error {
+  constructor(readonly gate: string) {
+    super(`${gate} is set by k4all: change it in the k4all addon (Settings → Virtualization).`);
+    this.name = 'K4allGateError';
+  }
+}
+
+/**
+ * Turns a gate on or off; other gates stay. Retries when the resource
+ * changed meanwhile. Resolves with the resource as written, which the views
+ * show until the list catches up.
+ */
+export function setFeatureGate(kv: Obj, name: string, on: boolean): Promise<Obj> {
   return runTask({ title: `${on ? 'Turn on' : 'Turn off'} ${name}`, target: { kind: 'datacenter', name: 'Features' } }, async () => {
     for (let attempt = 0; ; attempt++) {
       const fresh = await kreq<Obj>(kubevirtPath(kv));
@@ -27,12 +42,12 @@ export function setFeatureGate(kv: Obj, name: string, on: boolean) {
       // A gate k4all's ClusterConfig lists is k4all's: it would put it back.
       const owned = k4allKubevirt(fresh, await isK4all());
       const theirs = [name, ...next.removed].find(g => owned.gatesOn.includes(g) || owned.gatesOff.includes(g));
-      if (theirs) throw new Error(`${theirs} is set by k4all: change it in the k4all addon (Settings → Virtualization).`);
+      if (theirs) throw new K4allGateError(theirs);
       // disabledFeatureGates exists from KubeVirt v1.8: written only where KubeVirt has it.
       const writeDisabled = !!gateTable(fresh)?.disabledList || disabledGates(fresh).length > 0;
       try {
         // A merge patch replaces just these lists; the resourceVersion makes it fail if the resource changed since the read.
-        await kmerge(kubevirtPath(fresh), {
+        const out = await kmerge<Obj>(kubevirtPath(fresh), {
           metadata: { resourceVersion: fresh.metadata.resourceVersion },
           spec: {
             configuration: {
@@ -40,7 +55,8 @@ export function setFeatureGate(kv: Obj, name: string, on: boolean) {
             },
           },
         });
-        return;
+        keepWritten(out);
+        return out;
       } catch (e: any) {
         if (e?.status !== 409 || attempt >= 2) throw e;
       }
@@ -62,10 +78,10 @@ export interface GateCheck {
 
 /** A gated control asks this; when the gate is off it is disabled with `why` and a link to the Features page. */
 export function useGate(name: string): GateCheck {
-  const d = useHangar();
+  const kv = useKubevirt(useHangar().kubevirt);
   return React.useMemo(() => {
-    if (!d.kubevirt) return { on: null };
-    const s = gateState(d.kubevirt, name);
+    if (!kv) return { on: null };
+    const s = gateState(kv, name);
     return s.on === false ? { on: false, why: `KubeVirt's ${name} feature is off` } : { on: s.on };
-  }, [d.kubevirt, name]);
+  }, [kv, name]);
 }

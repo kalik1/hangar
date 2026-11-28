@@ -11,6 +11,9 @@
  * On k4all, what k4all owns (the gates its ClusterConfig lists, emulation,
  * the VM state datastore, the update methods of its release) is shown
  * read-only with a link to the k4all addon; the rest stays Hangar's.
+ * A switch shows its change at once (pending), then the state Hangar wrote
+ * while the polled list is still old (done), or goes back with the reason
+ * (failed): ui/rowState.tsx.
  */
 
 import { Icon } from '@iconify/react';
@@ -23,9 +26,11 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import React from 'react';
 import { Link as RouterLink, useHistory } from 'react-router-dom';
+import { errorText } from '../../api/client';
 import { HangarData, useHangar } from '../../api/data';
-import { kubevirtPath, setFeatureGate, useCanPatchKubevirt } from '../../api/gates';
+import { K4allGateError, kubevirtPath, setFeatureGate, useCanPatchKubevirt } from '../../api/gates';
 import { useK4all } from '../../api/k4all';
+import { useKubevirt } from '../../api/kubevirtCopy';
 import { useManagedFields } from '../../api/managedFields';
 import { NOT_ALLOWED } from '../../api/permissions';
 import { useProtectionPolicy } from '../../api/protection';
@@ -58,12 +63,11 @@ import { useK8s } from '../../shell/settings';
 import { confirm } from '../../ui/dialogs';
 import { K8sName, Panel, Tag } from '../../ui/kit';
 import { Led } from '../../ui/Led';
+import { RowStatus, useRowChange } from '../../ui/rowState';
 import { LedTone, tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
 import { Note } from '../storage/parts';
 import { K4allLink, K4allManaged } from './K4allManaged';
-
-const quiet = (p: Promise<unknown>) => p.catch(() => undefined);
 
 export const SETTINGS_SECTIONS = ['features', 'protection'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
@@ -90,7 +94,7 @@ export function SettingsView({ section: raw, focus }: { section?: string; focus?
   const t = useTokens();
   const history = useHistory();
   const section = settingsSection(raw);
-  const kv = d.kubevirt;
+  const kv = useKubevirt(d.kubevirt);
   const version = kubevirtVersion(kv);
   const rows = gateRows(kv);
   const onCount = [...rows.hangar, ...rows.listedOther].filter(r => r.on).length;
@@ -154,7 +158,8 @@ function MaturityTag({ m }: { m: GateState['maturity'] }) {
   return <Tag tone={m === 'Alpha' || m === 'Deprecated' ? 'warn' : m === 'GA' ? 'accent' : undefined}>{words[m]}</Tag>;
 }
 
-async function toggleGate(d: HangarData, kv: Obj, r: GateRow, on: boolean, k4all: boolean) {
+/** Asks before a gate goes on or off: what changes, and the VMs that lose a feature. */
+async function confirmGate(d: HangarData, kv: Obj, r: GateRow, on: boolean, k4all: boolean): Promise<boolean> {
   const next = nextGates(kv, r.name, on);
   const { removed } = next;
   const before = { f: listedGates(kv), dis: disabledGates(kv) };
@@ -202,7 +207,7 @@ async function toggleGate(d: HangarData, kv: Obj, r: GateRow, on: boolean, k4all
     confirm: on ? 'Turn on' : 'Turn off',
     danger: users.length > 0,
   });
-  if (ok) quiet(setFeatureGate(kv, r.name, on));
+  return !!ok;
 }
 
 function GateLine({ r, d, kv, canPatch, k4all, owned, focus }: { r: GateRow; d: HangarData; kv: Obj | null; canPatch: boolean; k4all: boolean; owned: K4allKubevirt; focus?: string }) {
@@ -213,7 +218,14 @@ function GateLine({ r, d, kv, canPatch, k4all, owned, focus }: { r: GateRow; d: 
   React.useEffect(() => {
     if (focused) ref.current?.scrollIntoView({ block: 'center' });
   }, [focused]);
-  const s = stateOf(r);
+  const change = useRowChange<boolean>();
+  const pending = change.state.phase === 'pending';
+  const s = pending ? { tone: 'busy' as const, text: change.state.want ? 'Turning on' : 'Turning off' } : stateOf(r);
+  const toggle = async (on: boolean) => {
+    if (!kv || !(await confirmGate(d, kv, r, on, k4all))) return;
+    await change.run(on, () => setFeatureGate(kv, r.name, on));
+  };
+  const failure = change.state.error;
   const toggleable = !!kv && !r.k4all && r.maturity !== 'GA' && r.maturity !== 'Discontinued' && (r.maturity !== null || r.listed);
   // Turning this one on would turn off a rival that k4all keeps on (the two hot-plug gates).
   const rival = kv && !r.on ? nextGates(kv, r.name, true).removed.find(g => owned.gatesOn.includes(g)) : undefined;
@@ -265,15 +277,34 @@ function GateLine({ r, d, kv, canPatch, k4all, owned, focus }: { r: GateRow; d: 
             k4all keeps {rival} on, and KubeVirt cannot use both
           </K4allManaged>
         )}
+        <RowStatus
+          state={change.state}
+          sx={{ mt: 0.5 }}
+          pending="Changing the KubeVirt resource…"
+          done={change.state.want ? 'Turned on.' : 'Turned off.'}
+          failed={
+            <>
+              {change.state.want ? 'Not turned on' : 'Not turned off'}: {errorText(failure)}
+              {failure instanceof K4allGateError && (
+                <>
+                  {' '}
+                  <K4allLink page="virtualization" anchor="feature-gates">
+                    Open the k4all addon
+                  </K4allLink>
+                </>
+              )}
+            </>
+          }
+        />
       </Box>
       <Box>
         {toggleable ? (
           <Tooltip title={why ?? (r.on ? `Turn off ${r.name}` : `Turn on ${r.name}`)}>
             <span>
               <Switch
-                checked={!!r.on}
-                disabled={!!why}
-                onChange={e => kv && toggleGate(d, kv, r, e.target.checked, k4all)}
+                checked={pending ? !!change.state.want : !!r.on}
+                disabled={!!why || pending}
+                onChange={e => toggle(e.target.checked)}
                 inputProps={{ 'aria-label': `${r.name}: ${r.feature?.unlocks ?? ''}` }}
               />
             </span>
@@ -311,8 +342,7 @@ function SettingRow({ label, ok, children, k8sName }: { label: string; ok?: bool
   );
 }
 
-function ClusterSettingsPanel({ d, owned }: { d: HangarData; owned: K4allKubevirt }) {
-  const kv = d.kubevirt;
+function ClusterSettingsPanel({ d, kv, owned }: { d: HangarData; kv: Obj | null; owned: K4allKubevirt }) {
   const c = clusterSettings(kv);
   const state = vmStateDatastore(kv, d.storageClasses);
   const evict = c.evictionStrategy ?? 'None';
@@ -368,7 +398,8 @@ function ClusterSettingsPanel({ d, owned }: { d: HangarData; owned: K4allKubevir
 
 function Features({ d, focus }: { d: HangarData; focus?: string }) {
   const t = useTokens();
-  const kv = d.kubevirt;
+  // The copy Hangar just wrote while the polled list is still old.
+  const kv = useKubevirt(d.kubevirt);
   const canPatch = useCanPatchKubevirt(kv);
   const k4all = useK4all();
   // What k4all's operator applies is in managedFields, which Headlamp's list drops: read them from a GET.
@@ -451,7 +482,7 @@ function Features({ d, focus }: { d: HangarData; focus?: string }) {
         {table && <Box sx={{ fontSize: 12.5, color: t.muted }}>{versionLine}</Box>}
       </Box>
       <Box sx={{ display: 'grid', gap: 2, minWidth: 0 }}>
-        <ClusterSettingsPanel d={d} owned={owned} />
+        <ClusterSettingsPanel d={d} kv={kv} owned={owned} />
         <Panel title="Not in KubeVirt" icon="mdi:information-outline">
           <Box component="ul" sx={{ m: 0, pl: 2.25, fontSize: 13, color: t.muted, lineHeight: 1.6 }}>
             <li>Start and shutdown order or delays between VMs: each VM has its own power policy.</li>

@@ -320,6 +320,12 @@ history keeps growing, the tasks keep being followed.
     from a GET of the KubeVirt resource (`api/managedFields.ts`):
     Headlamp's list hooks delete them from listed objects. cpuModel, evictionStrategy,
     vmRolloutStrategy and the device mappings stay Hangar's.
+    Each switch has a row state (`ui/rowState.tsx`, idle → pending → done |
+    failed): while the patch runs it shows the asked position and "Turning
+    on"; then the state from the object the patch returned, kept
+    (`api/kubevirtCopy.ts`, per cluster, the same copy device mappings keep)
+    until the polled list has it; a failure puts the switch back and says
+    why on the row, with a link to the k4all addon when k4all owns the gate.
   - *Delete protection*: whether the policy and its binding are installed
     (GET on both; "cannot tell" without the right to read them), how to
     install it, the protected VMs.
