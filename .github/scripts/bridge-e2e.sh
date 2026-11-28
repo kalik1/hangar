@@ -190,9 +190,13 @@ k delete apiservice "$apiservice" --wait
 # carries its name label.
 k delete -k "$root/distribution/guest-bridge" -l app.kubernetes.io/name=hangar-guest-bridge --wait --timeout=120s
 k -n hangar-system wait --for=delete pod -l app.kubernetes.io/name=hangar-guest-bridge --timeout=120s
-# What the bridge created itself.
-k -n hangar-system delete secret hangar-guest-bridge-tls --ignore-not-found
-k -n hangar-system delete lease hangar-guest-bridge --ignore-not-found
+# What the bridge made itself, with its name label, deleted as README.md says.
+made=$(k -n hangar-system get secrets,leases -l app.kubernetes.io/name=hangar-guest-bridge -o name | sort | tr '\n' ' ')
+[ "$made" = "lease.coordination.k8s.io/hangar-guest-bridge secret/hangar-guest-bridge-tls " ] || fail "the bridge's own objects with its label: '$made'"
+k -n hangar-system delete secret/hangar-guest-bridge-tls lease/hangar-guest-bridge --ignore-not-found
+for o in secret/hangar-guest-bridge-tls lease/hangar-guest-bridge; do
+  if k -n hangar-system get "$o" >/dev/null 2>&1; then fail "$o is still there"; fi
+done
 k api-resources >/dev/null 2>"$work/discovery.err" || fail "discovery after removal: $(cat "$work/discovery.err")"
 if k get --raw /apis | jq -e '.groups[] | select(.name == "subresources.hangar.magesgate.com")' >/dev/null; then
   fail "/apis still lists the group"

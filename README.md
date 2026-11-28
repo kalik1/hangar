@@ -207,8 +207,7 @@ the node agent shares, then what the bridge made itself:
 ```bash
 kubectl delete apiservice v1alpha1.subresources.hangar.magesgate.com
 kubectl delete -k distribution/guest-bridge -l app.kubernetes.io/name=hangar-guest-bridge
-kubectl -n hangar-system delete secret hangar-guest-bridge-tls
-kubectl -n hangar-system delete lease hangar-guest-bridge
+kubectl -n hangar-system delete secret/hangar-guest-bridge-tls lease/hangar-guest-bridge --ignore-not-found
 ```
 
 `kubectl delete namespace hangar-system` afterwards only when the node agent

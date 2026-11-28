@@ -247,6 +247,9 @@ func electionConfig(kube kubernetes.Interface, o Options, started func(context.C
 			LeaseMeta:  metav1.ObjectMeta{Name: LeaseName, Namespace: o.Namespace},
 			Client:     kube.CoordinationV1(),
 			LockConfig: resourcelock.ResourceLockConfig{Identity: o.PodName + "_" + string(uuid.NewUUID())},
+			// As the Secret's: a removal finds what the bridge made by this
+			// label, or by name. Set on create and on each update.
+			Labels: map[string]string{"app.kubernetes.io/name": "hangar-guest-bridge", "app.kubernetes.io/part-of": "hangar"},
 		},
 		LeaseDuration:   orDefault(o.LeaseDuration, 30*time.Second),
 		RenewDeadline:   orDefault(o.RenewDeadline, 20*time.Second),
