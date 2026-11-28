@@ -5,6 +5,8 @@ import {
   cloudInitOverflow,
   cloudInitRefusal,
   cloudInitSecret,
+  cloudInitSecretName,
+  cloudInitSecretRefs,
   cloudInitUserData,
   copiedCloudInit,
   copyVm,
@@ -14,6 +16,7 @@ import {
   userNameProblem,
   withCloudInitSecret,
   withHostname,
+  withoutVolumes,
   WizardInput,
 } from './vmspec';
 
@@ -243,20 +246,37 @@ describe('cloud-init over KubeVirt’s inline limit (hangar#7)', () => {
     expect(cloudInitOverflow(vm)).toEqual([{ volume: 'ci2', data: { data: { userdata: b64 } }, bytes: 2049 }]);
   });
 
-  it('the Secret: generated name, the VM’s folder, the key KubeVirt reads; the VM refers to it instead', () => {
+  it('the Secret: a name chosen before the VM, the VM’s folder, the key KubeVirt reads, owned by the VM from its creation; the VM refers to it instead', () => {
     const vm = vmWith(sized(3000));
     const [o] = cloudInitOverflow(vm);
-    expect(cloudInitSecret(vm, o)).toEqual({
+    expect(cloudInitSecretName('web-03', n => Uint8Array.from({ length: n }, (_, i) => i * 9))).toBe('web-03-cloudinit-ajs1a');
+    expect(cloudInitSecretName('web-03')).toMatch(/^web-03-cloudinit-[a-z0-9]{5}$/);
+    const labels = { 'hangar.magesgate.com/cloud-init-of': 'web-03', 'app.kubernetes.io/managed-by': 'hangar' };
+    expect(cloudInitSecret(vm, o, 'web-03-cloudinit-abcde')).toEqual({
       apiVersion: 'v1',
       kind: 'Secret',
-      metadata: { generateName: 'web-03-cloudinit-', namespace: 'prod', labels: { 'hangar.magesgate.com/cloud-init-of': 'web-03', 'app.kubernetes.io/managed-by': 'hangar' } },
+      metadata: { name: 'web-03-cloudinit-abcde', namespace: 'prod', labels },
       type: 'Opaque',
       stringData: { userdata: sized(3000) },
+    });
+    expect(cloudInitSecret(vm, o, 'web-03-cloudinit-abcde', 'vm-uid').metadata).toEqual({
+      name: 'web-03-cloudinit-abcde',
+      namespace: 'prod',
+      labels,
+      ownerReferences: [{ apiVersion: 'kubevirt.io/v1', kind: 'VirtualMachine', name: 'web-03', uid: 'vm-uid' }],
     });
     const out = withCloudInitSecret(vm, 'cloudinitdisk', 'web-03-cloudinit-abcde');
     expect(out.spec.template.spec.volumes.find((v: any) => v.name === 'cloudinitdisk')).toEqual({ name: 'cloudinitdisk', cloudInitNoCloud: { secretRef: { name: 'web-03-cloudinit-abcde' } } });
     expect(vm.spec.template.spec.volumes.find((v: any) => v.name === 'cloudinitdisk').cloudInitNoCloud.userData).toBe(sized(3000));
     expect(cloudInitOverflow(out)).toEqual([]);
+    expect(cloudInitSecretRefs(out)).toEqual([{ volume: 'cloudinitdisk', secret: 'web-03-cloudinit-abcde' }]);
+    expect(cloudInitSecretRefs(vm)).toEqual([]);
+  });
+
+  it('withoutVolumes drops a volume and its disk (a copy whose cloud-init Secret is not in its folder)', () => {
+    const vm = withoutVolumes(vmWith('#cloud-config\n'), ['cloudinitdisk']);
+    expect(vm.spec.template.spec.volumes.map((v: any) => v.name)).toEqual(['rootdisk']);
+    expect(vm.spec.template.spec.domain.devices.disks.map((d: any) => d.name)).toEqual(['rootdisk']);
   });
 
   it('says why it refuses', () => {

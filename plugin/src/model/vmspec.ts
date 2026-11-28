@@ -483,15 +483,27 @@ export function copiedCloudInit(vm: VM, texts: Map<string, string>): CloudInitOv
   return out;
 }
 
-/** The Secret that holds a VM's user data instead (KubeVirt reads its key `userdata`); its name is generated. */
-export function cloudInitSecret(vm: VM, o: CloudInitOverflow): Omit<Obj, 'metadata'> & { metadata: { generateName: string; namespace?: string; labels: Record<string, string> } } {
+const SUFFIX = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+/** A name for the Secret of a VM's user data: <vm>-cloudinit-<5 random characters>, chosen before the VM exists (it refers to it). */
+export function cloudInitSecretName(vmName: string, bytes: (n: number) => Uint8Array = randomBytes): string {
+  return `${vmName}-cloudinit-${Array.from(bytes(5), b => SUFFIX[b % SUFFIX.length]).join('')}`;
+}
+
+/**
+ * The Secret that holds a VM's user data instead (KubeVirt reads its key
+ * `userdata`). With the VM's UID it is owned by the VM, from its creation:
+ * the garbage collector deletes it with the VM, and no patch is needed.
+ */
+export function cloudInitSecret(vm: VM, o: CloudInitOverflow, name: string, uid?: string): Obj {
   return {
     apiVersion: 'v1',
     kind: 'Secret',
     metadata: {
-      generateName: `${vm.metadata.name}-cloudinit-`,
+      name,
       namespace: vm.metadata.namespace,
       labels: { [L_CLOUD_INIT_OF]: vm.metadata.name, 'app.kubernetes.io/managed-by': 'hangar' },
+      ...(uid ? { ownerReferences: [{ apiVersion: 'kubevirt.io/v1', kind: 'VirtualMachine', name: vm.metadata.name, uid }] } : {}),
     },
     type: 'Opaque',
     ...o.data,
@@ -508,6 +520,26 @@ export function withCloudInitSecret(vm: VM, volume: string, secret: string): VM 
     delete ci.userDataBase64;
     ci.secretRef = { name: secret };
   }
+  return out;
+}
+
+/** The VM's cloud-init volumes that read their user data from a Secret. */
+export function cloudInitSecretRefs(vm: VM): { volume: string; secret: string }[] {
+  const out: { volume: string; secret: string }[] = [];
+  for (const v of vm.spec?.template?.spec?.volumes ?? []) {
+    const secret = (v.cloudInitNoCloud ?? v.cloudInitConfigDrive)?.secretRef?.name;
+    if (secret) out.push({ volume: v.name, secret });
+  }
+  return out;
+}
+
+/** The VM without these volumes and their disks. */
+export function withoutVolumes(vm: VM, names: string[]): VM {
+  const out = clone(vm);
+  const t = out.spec?.template?.spec;
+  if (!t) return out;
+  t.volumes = (t.volumes ?? []).filter((v: any) => !names.includes(v.name));
+  if (t.domain?.devices?.disks) t.domain.devices.disks = t.domain.devices.disks.filter((d: any) => !names.includes(d.name));
   return out;
 }
 

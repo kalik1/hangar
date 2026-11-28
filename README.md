@@ -118,6 +118,9 @@ other than cluster-admin: `hangar-viewer`, `hangar-vm-operator` and
 `hangar-vm-admin` (bind them per folder with a RoleBinding, or cluster-wide
 with a ClusterRoleBinding), and `hangar-hardware-admin` for host devices.
 Controls a user's role does not allow are disabled with the reason.
+`hangar-vm-admin` may create Secrets, only to keep a VM's cloud-init user
+data when it is longer than KubeVirt takes inline (2,048 bytes); no role
+reads, lists or changes Secrets.
 
 ```bash
 kubectl apply -f distribution/rbac.yaml

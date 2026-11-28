@@ -155,10 +155,14 @@ history keeps growing, the tasks keep being followed.
   lack the QEMU guest agent: `packages` installs it. KubeVirt refuses
   inline user data over 2,048 bytes (`cloudInitUserMaxLen`): `createVm`
   (`api/cloudInit.ts`) keeps longer user data in a Secret of the VM's
-  folder (`cloudInitNoCloud.secretRef`, key `userdata`, owned by the VM)
-  and refuses with the reason when it cannot make it; the review says so.
-  Making the Secret needs `create` on Secrets in the folder, which
-  Hangar's own roles do not give. On k4all, guest
+  folder (`cloudInitNoCloud.secretRef`, key `userdata`) and refuses with
+  the reason when it cannot make it; the review says so. It needs only
+  `create` on Secrets (hangar-vm-admin): a dry run of the Secret first
+  (refused: nothing is created), then the VM, which gives its UID, then
+  the Secret with the VM as its owner, so the garbage collector deletes it
+  with the VM and nothing is patched; if that Secret still fails, the VM
+  is deleted again. A VM created running waits for the Secret that long
+  (the kubelet retries the mount). No Hangar role reads Secrets. On k4all, guest
   customization also asks for k4all's metadata service on 169.254.169.254
   (on by default when k4all's ClusterConfig turns it on:
   `spec.features.virt.metadata.enabled`, read instead of looking for the
@@ -189,9 +193,13 @@ history keeps growing, the tasks keep being followed.
 - **Clone, clone to template, new VM from template**: every persistent disk
   is copied with CDI; the copy gets a new fixed MAC on its NAT adapters
   (none on the others), a new firmware UUID and serial, and its own
-  hostname in cloud-init. User data the source keeps in a Secret is read
-  (when the user may) into a Secret of the copy's own: never inline, where
-  anyone who may read the VM would see it.
+  hostname in cloud-init. User data the source keeps in a Secret goes into
+  a Secret of the copy's own, in the same order: never inline, where
+  anyone who may read the VM would see it. Reading the source's Secret
+  needs `get`, which no Hangar role gives; without it the dialog says what
+  the copy gets: in the same folder the source's Secret (its hostname,
+  gone with the source), in another folder no cloud-init user data (a
+  reference to a Secret that is not there would keep it from starting).
 - **Hosts**: list with state, VMs, CPU and memory usage, hardware; host
   page with resources (used and allocated), its VMs and whether each can
   move live, usage charts, events, **Enter/Exit maintenance mode**.
