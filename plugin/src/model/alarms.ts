@@ -4,6 +4,7 @@
  */
 
 import { hostState } from './inventory';
+import { stuckDiskMove } from './move';
 import { Obj } from './types';
 import { key, pendingRestart, powerState } from './vm';
 
@@ -67,7 +68,17 @@ export function alarms(i: AlarmInput): Alarm[] {
     const t = { kind: 'vm' as const, namespace: vm.metadata.namespace, name: vm.metadata.name };
     if (p.tone === 'fault')
       out.push({ id: `vm-${key(vm)}`, severity: 'critical', title: `${vm.metadata.name}: ${p.label}`, detail: p.detail, target: t });
-    const r = pendingRestart(vm);
+    const vmMigrations = i.migrations.filter(m => m.metadata.namespace === vm.metadata.namespace && m.spec?.vmiName === vm.metadata.name);
+    const stuck = stuckDiskMove(vm, i.vmiIdx.get(key(vm)), vmMigrations, now);
+    if (stuck)
+      out.push({
+        id: `stuck-move-${key(vm)}`,
+        severity: 'critical',
+        title: `${vm.metadata.name}: a disk move cannot end`,
+        detail: 'Do not restart it: it would start from the new, empty disk. Put the old disk back from its page.',
+        target: t,
+      });
+    const r = stuck ? undefined : pendingRestart(vm);
     if (r && (p.kind === 'on' || p.kind === 'paused'))
       out.push({ id: `restart-${key(vm)}`, severity: 'info', title: `${vm.metadata.name} waits for a restart`, detail: r, target: t });
   }

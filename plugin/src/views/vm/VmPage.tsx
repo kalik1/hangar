@@ -1,5 +1,6 @@
 /*
- * A VM's page: the faceplate, a pending-restart notice, then the tabs.
+ * A VM's page: the faceplate, a stuck-disk-move or pending-restart notice,
+ * then the tabs.
  */
 
 import { Icon } from '@iconify/react';
@@ -22,6 +23,7 @@ import { EventsTab } from './EventsTab';
 import { Faceplate } from './Faceplate';
 import { KubernetesTab } from './KubernetesTab';
 import { MonitorTab } from './MonitorTab';
+import { confirmPutOldDisksBack, stuckMoveOf } from './MoveDiskDialog';
 import { SnapshotsTab } from './SnapshotsTab';
 import { SummaryTab } from './SummaryTab';
 
@@ -51,12 +53,38 @@ export function VmPage({ namespace, name, tab }: { namespace: string; name: stri
     ...(k8s ? ([['kubernetes', 'Kubernetes']] as [string, string][]) : []),
   ];
   const current = tab === 'serial' ? 'console' : tabs.some(([id]) => id === tab) ? (tab as string) : 'summary';
-  const restart = pendingRestart(vm);
+  const stuck = stuckMoveOf(vm, d);
+  // A restart of a VM whose disk move cannot end boots the blank disk: no "Restart now" then.
+  const restart = stuck ? undefined : pendingRestart(vm);
   return (
     // The Console tab fills exactly the pane below the tabs (no page scroll);
     // the other tabs grow with their content and the pane scrolls.
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100%', ...(current === 'console' ? { height: '100%' } : {}) }}>
       <Faceplate vm={vm} p={p} />
+      {stuck && (
+        <Box
+          role="alert"
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            px: 2,
+            py: 1,
+            background: t.dark ? 'rgba(229,62,62,0.14)' : '#FDECEC',
+            borderBottom: `1px solid ${t.rule}`,
+            fontSize: 14,
+          }}
+        >
+          <Icon icon="mdi:database-alert-outline" width={20} style={{ color: '#C53030', flex: 'none' }} />
+          <Box sx={{ flex: 1 }}>
+            <b>A disk move cannot end. Do not restart the VM.</b> It names {stuck.volumes.length === 1 ? 'a new disk that is' : 'new disks that are'} still empty
+            ({stuck.volumes.map(v => v.newClaim).join(', ')}), while the guest runs on the old {stuck.volumes.length === 1 ? 'one' : 'ones'}.
+          </Box>
+          <Button size="small" variant="outlined" color="inherit" onClick={() => confirmPutOldDisksBack(vm, stuck, d)} sx={{ textTransform: 'none', flex: 'none' }}>
+            Put the old disk{stuck.volumes.length === 1 ? '' : 's'} back…
+          </Button>
+        </Box>
+      )}
       {restart && !tpl && (
         <Box
           role="status"

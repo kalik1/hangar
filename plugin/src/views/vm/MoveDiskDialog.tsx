@@ -1,8 +1,10 @@
 /*
  * Move a VM's disks to another datastore (storage migration). Live when
- * the VM runs and KubeVirt can copy while it runs; powered off otherwise
- * (a copy, then the VM uses it). The typical move: from disks local to one
- * host to shared storage, after which the VM can move between hosts live.
+ * the VM runs and another host can take it (KubeVirt copies the disks while
+ * it migrates the VM); powered off otherwise (a copy, then the VM uses it:
+ * a running VM is shut down for it and started again). The typical move:
+ * from disks local to one host to shared storage, after which the VM can
+ * move between hosts live.
  */
 
 import { Icon } from '@iconify/react';
@@ -17,19 +19,22 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import React from 'react';
-import { useHangar } from '../../api/data';
-import { diskNames, moveDisks } from '../../api/move';
+import { HangarData, useHangar } from '../../api/data';
+import { diskNames, moveDisks, putOldDisksBack } from '../../api/move';
 import { datastores } from '../../model/capacity';
+import { diskMoveMode, StuckDiskMove, stuckDiskMove } from '../../model/move';
 import { liveGate, localityLabel, preferredDatastore, storageLiveMigratable, vmDiskPlaces } from '../../model/placement';
 import { claimSize } from '../../model/storage';
 import { Obj } from '../../model/types';
 import { formatBytes } from '../../model/units';
 import { key, powerState } from '../../model/vm';
 import { useK8s } from '../../shell/settings';
+import { confirm } from '../../ui/dialogs';
 import { K8sName } from '../../ui/kit';
 import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
 import { datastoreItems, renderDatastore } from '../storage/DatastorePick';
+import { useVmPlacement } from './useVmPlacement';
 
 /** KubeVirt's settings that live disk moves need: LiveUpdate rollout (the default) and the LiveMigrate workload update method. */
 export function liveDiskMovesEnabled(kubevirt: Obj | null): { ok: boolean; missing: string[] } {
@@ -61,20 +66,18 @@ export function MoveDiskDialog({ vm, onClose, only }: { vm: Obj; onClose: () => 
   const [target, setTarget] = React.useState<string>(firstOther?.name ?? '');
   const [deleteOld, setDeleteOld] = React.useState(true);
 
-  const running = !!vmi?.status?.nodeName;
-  const gate = liveGate(vmi);
   const kv = liveDiskMovesEnabled(d.kubevirt);
-  const hostDevices = gate.reason === 'HostDeviceNotLiveMigratable';
-  const canLive = running && storageLiveMigratable(vmi) && !hostDevices && kv.ok;
-  const off = power.kind === 'off';
-  const mode: 'live' | 'off' | 'blocked' = running ? (canLive ? 'live' : 'blocked') : off ? 'off' : 'blocked';
-  const blockedWhy = running
-    ? hostDevices
-      ? 'It uses a device of its host, so KubeVirt cannot copy its disks while it runs. Shut it down to move them.'
-      : !kv.ok
-      ? 'Live disk moves are not enabled in this cluster. Shut the VM down to move them, or ask an administrator to enable them.'
-      : 'KubeVirt cannot copy its disks while it runs. Shut it down to move them.'
-    : `The VM is ${power.label.toLowerCase()}: wait until it is powered off or running.`;
+  const verdicts = useVmPlacement(vm);
+  const how = diskMoveMode({
+    power: power.kind,
+    powerLabel: power.label,
+    storageLive: storageLiveMigratable(vmi),
+    liveReason: liveGate(vmi).reason,
+    kubevirtMissing: kv.missing,
+    hosts: verdicts.hosts,
+  });
+  const mode = how.mode;
+  const restart = how.mode === 'offline' && how.restart;
 
   const rows = places.map(p => {
     const pvc = d.idx.pvc.get(`${ns}/${p.claim}`);
@@ -94,6 +97,7 @@ export function MoveDiskDialog({ vm, onClose, only }: { vm: Obj; onClose: () => 
       vm: live,
       moves: chosen.map(r => ({ volume: r.name, claim: r.claim as string, datastore: target, sizeBytes: r.size })),
       live: mode === 'live',
+      restart,
       deleteOld,
       taken,
       roots,
@@ -107,14 +111,21 @@ export function MoveDiskDialog({ vm, onClose, only }: { vm: Obj; onClose: () => 
         Move disks of {vm.metadata.name}
       </DialogTitle>
       <DialogContent>
+        {restart && how.why && (
+          <Typography sx={{ fontSize: 13.5, mb: 1 }}>
+            <b>It cannot move its disks while running.</b> {how.why}
+          </Typography>
+        )}
         <Typography sx={{ fontSize: 13.5, color: t.muted, mb: 1.5 }}>
-          {mode === 'live'
-            ? 'The VM keeps running: KubeVirt copies the disks to the new datastore, then switches to them.'
-            : mode === 'off'
-            ? 'Hangar copies the disks to the new datastore; the VM uses the copies once they are complete. Keep it powered off meanwhile.'
-            : blockedWhy}
+          {how.mode === 'live'
+            ? `The VM keeps running: KubeVirt copies the disks to the new datastore while it moves the VM to ${how.targets.length === 1 ? how.targets[0] : 'another host'}, then the VM uses them.`
+            : how.mode === 'offline'
+            ? how.restart
+              ? 'Hangar shuts the guest down, copies the disks to the new datastore, and starts the VM again on the copies. It is down while the disks are copied.'
+              : 'Hangar copies the disks to the new datastore; the VM uses the copies once they are complete. Keep it powered off meanwhile.'
+            : how.why}
         </Typography>
-        {k8s && mode === 'blocked' && running && !kv.ok && <K8sName>KubeVirt CR needs {kv.missing.join(', ')}</K8sName>}
+        {k8s && restart && kv.missing.length > 0 && <K8sName>KubeVirt CR needs {kv.missing.join(', ')}</K8sName>}
 
         <Box sx={{ border: `1px solid ${t.rule}`, borderRadius: 1, mb: 2 }}>
           {rows.length === 0 && <Box sx={{ p: 1.5, color: t.muted, fontSize: 13.5 }}>This VM has no disks on a datastore.</Box>}
@@ -174,7 +185,7 @@ export function MoveDiskDialog({ vm, onClose, only }: { vm: Obj; onClose: () => 
           Cancel
         </Button>
         <Button variant="contained" onClick={go} disabled={!ok}>
-          {mode === 'live' ? 'Move while running' : 'Move disks'}
+          {mode === 'live' ? 'Move while running' : restart ? 'Shut down and move' : 'Move disks'}
         </Button>
       </DialogActions>
     </Dialog>
@@ -182,3 +193,33 @@ export function MoveDiskDialog({ vm, onClose, only }: { vm: Obj; onClose: () => 
 }
 
 const lowerFirst = (x: string) => x.charAt(0).toLowerCase() + x.slice(1);
+
+/** A live disk move of the VM that cannot end (left by Hangar 0.1.x), or null. */
+export function stuckMoveOf(vm: Obj, d: HangarData): StuckDiskMove | null {
+  return stuckDiskMove(vm, d.idx.vmi.get(key(vm)), d.idx.migrations.get(key(vm)) ?? []);
+}
+
+/** "Put the old disk back": asks, then reverts the move; the new, blank disks go unless kept. */
+export async function confirmPutOldDisksBack(vm: Obj, stuck: StuckDiskMove, d: HangarData) {
+  const one = stuck.volumes.length === 1;
+  const r = await confirm({
+    title: `Put the old disk${one ? '' : 's'} of ${vm.metadata.name} back?`,
+    body: (
+      <>
+        <p>
+          The move to the new disk{one ? '' : 's'} cannot end: KubeVirt copies the disks of a running VM while it moves it to another host, and no host can take it.
+          Meanwhile the VM names {one ? 'a new disk that is' : 'new disks that are'} still empty, while the guest runs on the old {one ? 'one' : 'ones'}: a restart now
+          would start from the empty disk{one ? '' : 's'}.
+        </p>
+        <p>
+          {stuck.volumes.map(v => `${v.volume}: back to ${v.oldClaim} (instead of ${v.newClaim})`).join('; ')}. KubeVirt then calls the copy off
+          {stuck.migrations.length ? `, and Hangar deletes its waiting migration${stuck.migrations.length === 1 ? '' : 's'}` : ''}. The guest keeps running.
+        </p>
+        <p>To move the disks, use Move disks again: it shuts the VM down when it cannot copy them while it runs.</p>
+      </>
+    ),
+    confirm: 'Put back',
+    option: { label: `Delete the new disk${one ? '' : 's'} (${stuck.volumes.map(v => v.newClaim).join(', ')})`, help: 'Nothing was copied to them.', initial: true },
+  });
+  if (r) putOldDisksBack(vm, stuck, d.idx.dv, { deleteNew: r.option }).catch(() => undefined);
+}

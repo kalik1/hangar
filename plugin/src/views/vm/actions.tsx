@@ -24,7 +24,7 @@ import { confirm, openDialog } from '../../ui/dialogs';
 import { CloneDialog } from './CloneDialog';
 import { useOpenConsole, useTakeSnapshot } from './hooks';
 import { MigrateDialog } from './MigrateDialog';
-import { MoveDiskDialog } from './MoveDiskDialog';
+import { confirmPutOldDisksBack, MoveDiskDialog, stuckMoveOf } from './MoveDiskDialog';
 
 export interface VmAction {
   id: string;
@@ -155,15 +155,26 @@ export function vmActions(
         run: () => quiet(A.cancelMigration(ns, moving.metadata.name, name)),
       });
     }
+    const stuck = stuckMoveOf(vm, d);
     out.push({
       id: 'move-disks',
       label: 'Move disks…',
       icon: 'mdi:database-arrow-right-outline',
       group: 'manage',
-      enabled: p.kind === 'off' || p.kind === 'on',
-      why: 'Wait until it is running or powered off',
+      enabled: !stuck && (p.kind === 'off' || p.kind === 'on'),
+      why: stuck ? 'A disk move cannot end: put the old disk back first' : 'Wait until it is running or powered off',
       run: () => openDialog(close => <MoveDiskDialog vm={vm} onClose={close} />),
     });
+    if (stuck) {
+      out.push({
+        id: 'put-old-disks-back',
+        label: stuck.volumes.length === 1 ? 'Put the old disk back…' : 'Put the old disks back…',
+        icon: 'mdi:database-refresh-outline',
+        group: 'manage',
+        enabled: true,
+        run: () => confirmPutOldDisksBack(vm, stuck, d),
+      });
+    }
   }
   out.push({
     id: 'clone',
@@ -279,6 +290,7 @@ export function vmActions(
     migrate: 'migrate',
     'cancel-migration': 'migrate',
     'move-disks': 'edit',
+    'put-old-disks-back': 'edit',
     clone: 'edit',
     'clone-template': 'edit',
     snapshot: 'power',
