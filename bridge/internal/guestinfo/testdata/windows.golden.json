@@ -1,0 +1,395 @@
+{
+  "kind": "GuestInfo",
+  "apiVersion": "subresources.hangar.magesgate.com/v1alpha1",
+  "agent": {
+    "connected": true,
+    "healthy": true,
+    "version": "9.2.0",
+    "commands": [
+      {
+        "name": "guest-exec",
+        "enabled": true
+      },
+      {
+        "name": "guest-exec-status",
+        "enabled": true
+      },
+      {
+        "name": "guest-file-close",
+        "enabled": true
+      },
+      {
+        "name": "guest-file-flush",
+        "enabled": true
+      },
+      {
+        "name": "guest-file-open",
+        "enabled": true
+      },
+      {
+        "name": "guest-file-read",
+        "enabled": true
+      },
+      {
+        "name": "guest-file-seek",
+        "enabled": true
+      },
+      {
+        "name": "guest-file-write",
+        "enabled": true
+      },
+      {
+        "name": "guest-fsfreeze-freeze",
+        "enabled": true
+      },
+      {
+        "name": "guest-fsfreeze-freeze-list",
+        "enabled": false
+      },
+      {
+        "name": "guest-fsfreeze-status",
+        "enabled": true
+      },
+      {
+        "name": "guest-fsfreeze-thaw",
+        "enabled": true
+      },
+      {
+        "name": "guest-fstrim",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-cpustats",
+        "enabled": false
+      },
+      {
+        "name": "guest-get-devices",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-disks",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-diskstats",
+        "enabled": false
+      },
+      {
+        "name": "guest-get-fsinfo",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-host-name",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-memory-block-info",
+        "enabled": false
+      },
+      {
+        "name": "guest-get-memory-blocks",
+        "enabled": false
+      },
+      {
+        "name": "guest-get-osinfo",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-time",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-timezone",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-users",
+        "enabled": true
+      },
+      {
+        "name": "guest-get-vcpus",
+        "enabled": true
+      },
+      {
+        "name": "guest-info",
+        "enabled": true
+      },
+      {
+        "name": "guest-network-get-interfaces",
+        "enabled": true
+      },
+      {
+        "name": "guest-ping",
+        "enabled": true
+      },
+      {
+        "name": "guest-set-memory-blocks",
+        "enabled": false
+      },
+      {
+        "name": "guest-set-time",
+        "enabled": true
+      },
+      {
+        "name": "guest-set-user-password",
+        "enabled": true
+      },
+      {
+        "name": "guest-set-vcpus",
+        "enabled": false
+      },
+      {
+        "name": "guest-shutdown",
+        "enabled": true
+      },
+      {
+        "name": "guest-ssh-add-authorized-keys",
+        "enabled": true
+      },
+      {
+        "name": "guest-ssh-get-authorized-keys",
+        "enabled": true
+      },
+      {
+        "name": "guest-ssh-remove-authorized-keys",
+        "enabled": true
+      },
+      {
+        "name": "guest-suspend-disk",
+        "enabled": true
+      },
+      {
+        "name": "guest-suspend-hybrid",
+        "enabled": false
+      },
+      {
+        "name": "guest-suspend-ram",
+        "enabled": true
+      },
+      {
+        "name": "guest-sync",
+        "enabled": true
+      },
+      {
+        "name": "guest-sync-delimited",
+        "enabled": true
+      }
+    ]
+  },
+  "system": {
+    "os": {
+      "kernelRelease": "20348",
+      "kernelVersion": "10.0",
+      "machine": "x86_64",
+      "id": "mswindows",
+      "name": "Microsoft Windows",
+      "prettyName": "Windows Server 2022 Standard",
+      "version": "Microsoft Windows Server 2022",
+      "versionId": "2022",
+      "variant": "server",
+      "variantId": "server"
+    },
+    "hostName": "WIN-GUEST",
+    "timezone": {
+      "zone": "Pacific Standard Time",
+      "offset": -28800
+    }
+  },
+  "cpu": {
+    "vcpus": [
+      {
+        "logicalId": 0,
+        "online": true
+      },
+      {
+        "logicalId": 1,
+        "online": true
+      }
+    ]
+  },
+  "disks": {
+    "disks": [
+      {
+        "name": "\\\\.\\PhysicalDrive0",
+        "partition": false,
+        "address": {
+          "pciController": {
+            "domain": 0,
+            "bus": 4,
+            "slot": 0,
+            "function": 0
+          },
+          "busType": "sata",
+          "bus": 0,
+          "target": 0,
+          "unit": 0,
+          "serial": "rootdisk",
+          "dev": "\\\\.\\PhysicalDrive0"
+        }
+      }
+    ],
+    "filesystems": [
+      {
+        "name": "\\\\?\\Volume{3f2a6c1e-0000-0000-0000-100000000000}\\",
+        "mountpoint": "C:\\",
+        "type": "NTFS",
+        "usedBytes": 23416856576,
+        "totalBytes": 63770849280,
+        "disk": [
+          {
+            "pciController": {
+              "domain": 0,
+              "bus": 4,
+              "slot": 0,
+              "function": 0
+            },
+            "busType": "sata",
+            "bus": 0,
+            "target": 0,
+            "unit": 0,
+            "serial": "rootdisk",
+            "dev": "\\\\.\\PhysicalDrive0"
+          }
+        ]
+      }
+    ]
+  },
+  "network": {
+    "interfaces": [
+      {
+        "name": "Ethernet Instance 0",
+        "hardwareAddress": "02:5e:7a:00:00:02",
+        "ipAddresses": [
+          {
+            "ipAddress": "fe80::2c5e:7aff:fe00:2%6",
+            "ipAddressType": "ipv6",
+            "prefix": 64
+          },
+          {
+            "ipAddress": "10.0.2.2",
+            "ipAddressType": "ipv4",
+            "prefix": 24
+          }
+        ],
+        "statistics": {
+          "rxBytes": 5021335,
+          "rxPackets": 6213,
+          "rxErrs": 0,
+          "rxDropped": 0,
+          "txBytes": 811224,
+          "txPackets": 3311,
+          "txErrs": 0,
+          "txDropped": 0
+        }
+      },
+      {
+        "name": "Loopback Pseudo-Interface 1",
+        "ipAddresses": [
+          {
+            "ipAddress": "::1",
+            "ipAddressType": "ipv6",
+            "prefix": 128
+          },
+          {
+            "ipAddress": "127.0.0.1",
+            "ipAddressType": "ipv4",
+            "prefix": 8
+          }
+        ]
+      }
+    ]
+  },
+  "users": {
+    "items": [
+      {
+        "user": "Administrator",
+        "domain": "WIN-GUEST",
+        "loginTime": 1795835000
+      }
+    ]
+  },
+  "devices": {
+    "items": [
+      {
+        "driverName": "Red Hat VirtIO SCSI controller",
+        "driverDate": 1704067200000000000,
+        "driverVersion": "100.95.104.26200",
+        "id": {
+          "type": "pci",
+          "vendorId": 6900,
+          "deviceId": 4162
+        }
+      },
+      {
+        "driverName": "Red Hat VirtIO Ethernet Adapter",
+        "driverDate": 1704067200000000000,
+        "driverVersion": "100.95.104.26200",
+        "id": {
+          "type": "pci",
+          "vendorId": 6900,
+          "deviceId": 4161
+        }
+      },
+      {
+        "driverName": "VirtIO Serial Driver",
+        "driverDate": 1704067200000000000,
+        "driverVersion": "100.95.104.26200",
+        "id": {
+          "type": "pci",
+          "vendorId": 6900,
+          "deviceId": 4163
+        }
+      },
+      {
+        "driverName": "Microsoft Basic Display Adapter",
+        "driverVersion": "10.0.20348.1"
+      }
+    ]
+  },
+  "sshkeys": {
+    "users": [
+      {
+        "username": "Administrator",
+        "keys": []
+      }
+    ]
+  },
+  "time": {
+    "guestTime": "2026-11-28T03:59:59.000000Z",
+    "hostTime": "2026-11-28T04:00:00.000000Z",
+    "driftSeconds": -1
+  },
+  "errors": [
+    {
+      "section": "cpu",
+      "command": "guest-get-cpustats",
+      "reason": "NotSupported",
+      "message": "guest-get-cpustats is not for this OS (qemu-ga 9.2.0 lists it as disabled)"
+    },
+    {
+      "section": "cpu",
+      "command": "guest-get-load",
+      "reason": "NotSupported",
+      "message": "this guest agent (qemu-ga 9.2.0) does not have guest-get-load; it needs qemu-ga 10.0 or later"
+    },
+    {
+      "section": "memory",
+      "command": "guest-get-memory-blocks",
+      "reason": "NotSupported",
+      "message": "guest-get-memory-blocks is not for this OS (qemu-ga 9.2.0 lists it as disabled)"
+    },
+    {
+      "section": "disks",
+      "command": "guest-get-diskstats",
+      "reason": "NotSupported",
+      "message": "guest-get-diskstats is not for this OS (qemu-ga 9.2.0 lists it as disabled)"
+    },
+    {
+      "section": "network",
+      "command": "guest-network-get-route",
+      "reason": "NotSupported",
+      "message": "this guest agent (qemu-ga 9.2.0) does not have guest-network-get-route"
+    }
+  ],
+  "readAt": "2026-11-28T04:00:00Z"
+}

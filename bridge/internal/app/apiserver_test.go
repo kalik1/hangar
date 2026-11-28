@@ -437,7 +437,7 @@ func (c *cluster) runBridges(ctx context.Context, t *testing.T) <-chan error {
 			PeerTokenFile: c.tokenFile(t, b.pod),
 			Handlers: func(context.Context, app.Env) (map[string]guest.Handler, error) {
 				h := guest.HandlerFunc(echoHandler(b.node))
-				return map[string]guest.Handler{v1alpha1.GuestInfo: h, v1alpha1.GuestFiles: h}, nil
+				return map[string]guest.Handler{v1alpha1.SubresourceGuestInfo: h, v1alpha1.SubresourceGuestFiles: h}, nil
 			},
 			LeaseDuration: 4 * time.Second,
 			RenewDeadline: 3 * time.Second,

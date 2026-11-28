@@ -1,0 +1,407 @@
+{
+  "replies": {
+    "guest-get-devices": {
+      "return": [
+        {
+          "driver-name": "Red Hat VirtIO SCSI controller",
+          "driver-date": 1704067200000000000,
+          "driver-version": "100.95.104.26200",
+          "id": {
+            "type": "pci",
+            "vendor-id": 6900,
+            "device-id": 4162
+          }
+        },
+        {
+          "driver-name": "Red Hat VirtIO Ethernet Adapter",
+          "driver-date": 1704067200000000000,
+          "driver-version": "100.95.104.26200",
+          "id": {
+            "type": "pci",
+            "vendor-id": 6900,
+            "device-id": 4161
+          }
+        },
+        {
+          "driver-name": "VirtIO Serial Driver",
+          "driver-date": 1704067200000000000,
+          "driver-version": "100.95.104.26200",
+          "id": {
+            "type": "pci",
+            "vendor-id": 6900,
+            "device-id": 4163
+          }
+        },
+        {
+          "driver-name": "Microsoft Basic Display Adapter",
+          "driver-version": "10.0.20348.1"
+        }
+      ]
+    },
+    "guest-get-disks": {
+      "return": [
+        {
+          "name": "\\\\.\\PhysicalDrive0",
+          "partition": false,
+          "address": {
+            "pci-controller": {
+              "domain": 0,
+              "bus": 4,
+              "slot": 0,
+              "function": 0
+            },
+            "bus-type": "sata",
+            "bus": 0,
+            "target": 0,
+            "unit": 0,
+            "serial": "rootdisk",
+            "dev": "\\\\.\\PhysicalDrive0"
+          }
+        }
+      ]
+    },
+    "guest-get-fsinfo": {
+      "return": [
+        {
+          "name": "\\\\?\\Volume{3f2a6c1e-0000-0000-0000-100000000000}\\",
+          "mountpoint": "C:\\",
+          "type": "NTFS",
+          "used-bytes": 23416856576,
+          "total-bytes": 63770849280,
+          "disk": [
+            {
+              "pci-controller": {
+                "domain": 0,
+                "bus": 4,
+                "slot": 0,
+                "function": 0
+              },
+              "bus-type": "sata",
+              "bus": 0,
+              "target": 0,
+              "unit": 0,
+              "serial": "rootdisk",
+              "dev": "\\\\.\\PhysicalDrive0"
+            }
+          ]
+        }
+      ]
+    },
+    "guest-get-host-name": {
+      "return": {
+        "host-name": "WIN-GUEST"
+      }
+    },
+    "guest-get-osinfo": {
+      "return": {
+        "name": "Microsoft Windows",
+        "kernel-release": "20348",
+        "version": "Microsoft Windows Server 2022",
+        "variant": "server",
+        "pretty-name": "Windows Server 2022 Standard",
+        "version-id": "2022",
+        "variant-id": "server",
+        "kernel-version": "10.0",
+        "machine": "x86_64",
+        "id": "mswindows"
+      }
+    },
+    "guest-get-time": {
+      "return": 1795838399000000000
+    },
+    "guest-get-timezone": {
+      "return": {
+        "zone": "Pacific Standard Time",
+        "offset": -28800
+      }
+    },
+    "guest-get-users": {
+      "return": [
+        {
+          "user": "Administrator",
+          "domain": "WIN-GUEST",
+          "login-time": 1795835000.0
+        }
+      ]
+    },
+    "guest-get-vcpus": {
+      "return": [
+        {
+          "logical-id": 0,
+          "online": true
+        },
+        {
+          "logical-id": 1,
+          "online": true
+        }
+      ]
+    },
+    "guest-info": {
+      "return": {
+        "version": "9.2.0",
+        "supported_commands": [
+          {
+            "enabled": true,
+            "name": "guest-exec",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-exec-status",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-file-close",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-file-flush",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-file-open",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-file-read",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-file-seek",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-file-write",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-fsfreeze-freeze",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-fsfreeze-freeze-list",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-fsfreeze-status",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-fsfreeze-thaw",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-fstrim",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-get-cpustats",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-devices",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-disks",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-get-diskstats",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-fsinfo",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-host-name",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-get-memory-block-info",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-get-memory-blocks",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-osinfo",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-time",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-timezone",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-users",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-get-vcpus",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-info",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-network-get-interfaces",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-ping",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-set-memory-blocks",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-set-time",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-set-user-password",
+            "success-response": true
+          },
+          {
+            "enabled": false,
+            "name": "guest-set-vcpus",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-shutdown",
+            "success-response": false
+          },
+          {
+            "enabled": true,
+            "name": "guest-ssh-add-authorized-keys",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-ssh-get-authorized-keys",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-ssh-remove-authorized-keys",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-suspend-disk",
+            "success-response": false
+          },
+          {
+            "enabled": false,
+            "name": "guest-suspend-hybrid",
+            "success-response": false
+          },
+          {
+            "enabled": true,
+            "name": "guest-suspend-ram",
+            "success-response": false
+          },
+          {
+            "enabled": true,
+            "name": "guest-sync",
+            "success-response": true
+          },
+          {
+            "enabled": true,
+            "name": "guest-sync-delimited",
+            "success-response": true
+          }
+        ]
+      }
+    },
+    "guest-network-get-interfaces": {
+      "return": [
+        {
+          "name": "Ethernet Instance 0",
+          "hardware-address": "02:5e:7a:00:00:02",
+          "ip-addresses": [
+            {
+              "ip-address-type": "ipv6",
+              "ip-address": "fe80::2c5e:7aff:fe00:2%6",
+              "prefix": 64
+            },
+            {
+              "ip-address-type": "ipv4",
+              "ip-address": "10.0.2.2",
+              "prefix": 24
+            }
+          ],
+          "statistics": {
+            "rx-bytes": 5021335,
+            "rx-packets": 6213,
+            "rx-errs": 0,
+            "rx-dropped": 0,
+            "tx-bytes": 811224,
+            "tx-packets": 3311,
+            "tx-errs": 0,
+            "tx-dropped": 0
+          }
+        },
+        {
+          "name": "Loopback Pseudo-Interface 1",
+          "ip-addresses": [
+            {
+              "ip-address-type": "ipv6",
+              "ip-address": "::1",
+              "prefix": 128
+            },
+            {
+              "ip-address-type": "ipv4",
+              "ip-address": "127.0.0.1",
+              "prefix": 8
+            }
+          ]
+        }
+      ]
+    },
+    "guest-ssh-get-authorized-keys Administrator": {
+      "return": {
+        "keys": []
+      }
+    }
+  }
+}
