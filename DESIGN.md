@@ -155,6 +155,54 @@ history keeps growing, the tasks keep being followed.
     the commands to `FILTER_RPC_ARGS`, or the systemd drop-in that empties
     it, each followed by the agent's restart), or a command too new for
     the guest's agent (with the version it needs).
+  - Files: the VM's folders next to a folder of this PC, through the guest
+    bridge's `guestfiles` (the agent's file commands; listings, stat, mkdir,
+    rename, chown and delete through `guest-exec`) and the browser's File
+    System Access API (Chromium and Electron; the folder is kept in
+    IndexedDB, the browser asks for permission again). Each pane has its
+    roots (the guest's mount points from `guestinfo`, the drives on
+    Windows), a path bar, sorting and a filter. Copies go both ways by
+    buttons or by dragging between the panes, and files dropped from this
+    PC's file manager land in the VM's folder; folders are walked on both
+    sides, and the overwrite questions (replace, skip, keep both, apply to
+    all) come before the first byte moves. Uploads write chunks of 1 MiB:
+    the first at offset 0 with `truncate`, each next at the size so far, a
+    failed one again at the same offset (the bridge's writes are
+    idempotent, which also carries a copy through a live migration's 503s);
+    keep both creates the new name exclusively first. Downloads read 3 MiB
+    at a time until the bridge says end of file. An optional SHA-256 check
+    hashes the bytes as they go against the guest's `sha256sum`
+    (`Get-FileHash` on Windows). Each copy is a task in the tasks dock
+    (progress, speed, time left, Cancel; one copy at a time per VM); a
+    cancelled upload deletes a file it created and says when a replaced
+    one is left incomplete. Above 200 MB the tab warns that the agent
+    channel is slow (about 13 MB/s up, 19 MB/s down) and points disk images
+    to Storage. On Linux, what Hangar creates gets the folder's owner, the
+    agent's (root) or one typed in (chown after the last chunk). "Edit on
+    this PC" saves a VM file to this PC with a writable handle, watches it
+    (`FileSystemObserver` where the browser has it, `getFile()` every 2 s),
+    and writes a save back on a click or on every save, after checking the
+    VM copy against the version read (size and mtime, then the SHA-256):
+    when both changed, keep the VM's, overwrite it, or save both. Editing
+    ends with the page. Firefox and Safari get the VM pane with upload, a
+    download (`showSaveFilePicker` where there is one, else a plain
+    browser download) and "Replace with a local file", which checks the
+    VM copy against a download made in this page. The tab shows only what
+    the agent reaches: on Fedora and the RHEL family SELinux confines it
+    (`virt_qemu_ga_t`), a listing it could not read whole is marked
+    partial with the count it read, a denied write outside /tmp and
+    /var/tmp says why, and the tab shows the guest-side change (a CIL
+    module that puts the agent's domain in `files_unconfined_type`, and the
+    drop-in that empties `FILTER_RPC_ARGS`) with its revert and its cost:
+    with it, whoever has `hangar-guest-admin` on the VM reads and changes
+    every file as root. The bridge relabels what it creates
+    (`restorecon`). Commands the guest blocks come with the two ways to
+    enable them; Windows and Debian or Ubuntu say that the agent runs as
+    SYSTEM or root. The tab needs `hangar-guest-admin` on this VM (a
+    SelfSubjectAccessReview per verb that names it, so `resourceNames`
+    bindings count); without `update`, `create` or `delete` those actions
+    are off. Transfers sit behind one interface (`FileChannel`), so another
+    channel can take the bridge's place.
   - Configure: CPU/memory/size profile, firmware and TPM (with persistent
     UEFI variables and TPM state), CPU flags (require/disable, with the hosts
     that offer each flag from KubeVirt's node labels), reservation and
@@ -722,6 +770,16 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
   is asked again after 2 s, twice, then at the next 30 s poll. The Windows
   paths (devices and drivers) are tested with fixtures only until
   kalik1/hangar#19.
+- The Files tab: the File System Access API exists in Chromium-based
+  browsers and Electron, on https or localhost; elsewhere the tab has no
+  local pane and no "Edit on this PC". A browser cannot start a local
+  application, so the tab names the file and its folder. Folders are not
+  uploaded from the file manager by drag and drop (only from the PC
+  pane). A plain browser download keeps the file in memory until it ends.
+  Through the guest agent a copy moves about 13 MB/s up and 19 MB/s down,
+  and the agent is busy meanwhile. Symbolic links and devices inside a
+  copied folder are not copied. The Windows paths are tested with
+  fixtures only until kalik1/hangar#19.
 - With Cilium, its `cni-exclusive` setting disables Multus: networks
   can be created but VMs get no secondary NIC until it is turned off.
 - With Cilium's kube-proxy replacement, VMs on the pod network

@@ -73,6 +73,8 @@ export class TaskStore {
   private tasks: Task[] = [];
   private listeners = new Set<Listener>();
   private storageKey = '';
+  /** How to stop a running task started on this page (file transfers); not stored. */
+  private cancels = new Map<string, () => void>();
 
   constructor(private storage: Pick<Storage, 'getItem' | 'setItem'> | null = safeStorage()) {}
 
@@ -128,6 +130,22 @@ export class TaskStore {
       return changed ? next : t;
     });
     if (changed) this.save();
+  }
+
+  /** Offers Cancel for a running task (null withdraws it). */
+  setCancel(id: string, fn: (() => void) | null) {
+    if (fn) this.cancels.set(id, fn);
+    else this.cancels.delete(id);
+    this.tasks = [...this.tasks];
+    this.emit();
+  }
+
+  canCancel(id: string): boolean {
+    return this.cancels.has(id) && this.tasks.some(t => t.id === id && t.status === 'running');
+  }
+
+  cancel(id: string) {
+    this.cancels.get(id)?.();
   }
 
   clearFinished() {

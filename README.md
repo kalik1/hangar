@@ -184,7 +184,10 @@ itself, and runs no command a user sends. `hangar-guest-admin` works in the
 guest with the guest agent's rights (root on most guests): it is not part
 of `hangar-vm-admin`, so bind it on its own, per folder with a RoleBinding,
 or for some VMs with a Role of your own that names them in
-`resourceNames`.
+`resourceNames`. On Fedora and the RHEL family SELinux confines the agent
+(writes in /tmp and /var/tmp only, part of the guest hidden): a VM's Files
+tab shows what it reaches, and the guest-side change, with its revert, that
+lets it reach every file.
 
 ```bash
 kubectl apply -k distribution/guest-bridge

@@ -1,7 +1,7 @@
 /*
  * A VM's page: the faceplate, a stuck-disk-move or pending-restart notice,
- * then the tabs (Summary, Console, Guest, Configure, Snapshots, Monitor,
- * Events, and Kubernetes in Kubernetes mode).
+ * then the tabs (Summary, Console, Guest, Files, Configure, Snapshots,
+ * Monitor, Events, and Kubernetes in Kubernetes mode).
  */
 
 import { Icon } from '@iconify/react';
@@ -22,6 +22,7 @@ import { ConfigureTab } from './ConfigureTab';
 import { CONSOLE_MIN, ConsoleTab } from './ConsoleTab';
 import { EventsTab } from './EventsTab';
 import { Faceplate } from './Faceplate';
+import { FilesTab } from './FilesTab';
 import { GuestTab } from './GuestTab';
 import { KubernetesTab } from './KubernetesTab';
 import { MonitorTab } from './MonitorTab';
@@ -49,6 +50,7 @@ export function VmPage({ namespace, name, tab }: { namespace: string; name: stri
     ['summary', 'Summary'],
     ...(!tpl ? ([['console', 'Console']] as [string, string][]) : []),
     ...(!tpl ? ([['guest', 'Guest']] as [string, string][]) : []),
+    ...(!tpl ? ([['files', 'Files']] as [string, string][]) : []),
     ['configure', 'Configure'],
     ...(!tpl ? ([['snapshots', 'Snapshots']] as [string, string][]) : []),
     ...(!tpl ? ([['monitor', 'Monitor']] as [string, string][]) : []),
@@ -131,6 +133,7 @@ export function VmPage({ namespace, name, tab }: { namespace: string; name: stri
         {current === 'summary' && <SummaryTab vm={vm} />}
         {current === 'console' && <ConsoleTab vm={vm} p={p} serial={tab === 'serial'} />}
         {current === 'guest' && <GuestTab vm={vm} />}
+        {current === 'files' && <FilesTab vm={vm} />}
         {current === 'configure' && <ConfigureTab vm={vm} />}
         {current === 'snapshots' && <SnapshotsTab vm={vm} />}
         {current === 'monitor' && <MonitorTab vm={vm} />}

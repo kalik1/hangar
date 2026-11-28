@@ -96,6 +96,11 @@ export function TaskRows({ list, now }: { list: Task[]; now: number }) {
                 <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, color: s.color }}>
                   <Icon icon={s.icon} width={16} />
                   <span>{task.status === 'running' && task.progress !== undefined ? `${Math.round(task.progress)}%` : s.label}</span>
+                  {store.canCancel(task.id) && (
+                    <Button size="small" color="inherit" onClick={() => store.cancel(task.id)} sx={{ textTransform: 'none', fontSize: 12.5, py: 0, minWidth: 0, ml: 0.5, color: t.muted }}>
+                      Cancel
+                    </Button>
+                  )}
                 </Box>
               </td>
               <Box component="td" sx={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', color: t.muted }} title={task.message}>

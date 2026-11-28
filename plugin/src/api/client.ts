@@ -33,6 +33,51 @@ export async function kreq<T = any>(path: string, init: Init = {}): Promise<T> {
   return res as T;
 }
 
+type RawInit = {
+  method?: string;
+  /** Sent as it is: bytes for the guest bridge's writes. */
+  body?: BodyInit;
+  contentType?: string;
+  accept?: string;
+  query?: Record<string, string>;
+  signal?: AbortSignal;
+  /** Headlamp's default is 2 minutes. */
+  timeoutMs?: number;
+};
+
+/**
+ * A request whose answer is the fetch Response itself (headers and raw
+ * bytes), through the same Headlamp proxy and auth. A failure rejects as
+ * kreq's do: an Error with `status` and Headlamp's "Status text - message".
+ * A request cancelled through `signal` rejects with `cancelled: true`.
+ * `read` takes the answer apart (its body included) under the same signal
+ * and timeout.
+ */
+export async function kraw<T = Response>(path: string, init: RawInit = {}, read: (r: Response) => Promise<T> = async r => r as unknown as T): Promise<T> {
+  const { method = 'GET', body, contentType = 'application/octet-stream', accept = '*/*', query, signal, timeoutMs = 2 * 60 * 1000 } = init;
+  const headers: Record<string, string> = { Accept: accept };
+  if (body !== undefined) headers['Content-Type'] = contentType;
+  // Headlamp's own timeout signal is replaced by this one.
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  const onAbort = () => ctl.abort();
+  signal?.addEventListener('abort', onAbort);
+  try {
+    const res = (await ApiProxy.clusterRequest(
+      path,
+      { method, body, headers, cluster: currentCluster(), isJSON: false, autoLogoutOnAuthError: false, signal: ctl.signal } as any,
+      query as any
+    )) as Response;
+    return await read(res);
+  } catch (e) {
+    if (signal?.aborted) throw Object.assign(new Error('Cancelled'), { cancelled: true });
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
+
 /** PUT on a KubeVirt subresource (start, stop, pause…): empty answers, so no JSON. */
 export function kput(path: string, body: unknown = {}): Promise<unknown> {
   return kreq(path, { method: 'PUT', body, json: false });
