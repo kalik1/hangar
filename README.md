@@ -29,6 +29,7 @@ names, related objects, YAML).
 | Storage | Datastores with capacity and capabilities; every disk with its VM, unattached disks |
 | Library | Disk images and ISOs: import from URL or registry, upload from the browser, new VM from an image |
 | Networks | Pod network and bridged/VLAN networks (Multus); create and delete |
+| Published ports | Make a VM's ports reachable inside the cluster, on every host's port (NodePort) or on an address of its own (LoadBalancer: MetalLB or Cilium LB IPAM): presets (SSH, RDP, HTTP, …), lists and ranges, TCP and UDP; live state per port (the VM behind it, the host port, the address and the host that announces it, why it failed); "Reachable at" on the VM summary with lines to copy; every published port of the datacenter in Networks |
 | Monitoring | Per-VM and per-host CPU and memory charts; guest agent data (OS, users, filesystems) |
 | Operations | Recent tasks with confirmed outcomes; events in plain words; alarms |
 | Kubernetes | Switch to show object names, related objects, links to Headlamp pages, YAML editor, YAML review before creating a VM |
@@ -201,6 +202,34 @@ writing, and never writes
 `HotplugVolumes` together with `DeclarativeHotplugVolumes`. Controls
 elsewhere that need a feature that is off are disabled with the reason and
 a link to it.
+
+### Published ports
+
+Configure → Published ports makes a VM's ports reachable through a
+Kubernetes Service that selects its pod (KubeVirt's `vmi.kubevirt.io/id`
+label, as `virtctl expose` does) and is owned by the VM, so it goes with it:
+
+- **inside the cluster** (ClusterIP): `<vm>-cluster.<folder>.svc`;
+- **on every host's port** (NodePort, 30000-32767): if firewalld runs on the
+  hosts, open that range there (the node agent tells Hangar where it runs);
+- **on an address of its own** (LoadBalancer): from an address pool an admin
+  made, a MetalLB `IPAddressPool` with an `L2Advertisement`, or a Cilium
+  `CiliumLoadBalancerIPPool` with a `CiliumL2AnnouncementPolicy` and
+  Cilium's L2 announcements on. Hangar never creates a pool, and never uses
+  k4all's `k4all-ingress-pool` (the ingress's own address).
+
+Only an adapter on the pod network with NAT (masquerade) or passt can
+publish; a VM on a bridged or VLAN network has its own address there. When
+the adapter lists `ports`, only those reach the guest: Hangar adds the
+published ones, which the guest gets at its next restart. The guest must
+listen on the port and its firewall allow it.
+
+Roles: `hangar-viewer` reads Services, EndpointSlices and the address pools
+(no Secrets); `hangar-vm-operator` publishes (create, patch, delete on
+Services); changing the adapter's port list is a VM edit (`hangar-vm-admin`).
+Who announces an address shows when the user may also read MetalLB's
+`servicel2statuses` (metallb-system) or Cilium's L2 leases (kube-system);
+Hangar's roles do not grant them.
 
 ### Delete protection
 

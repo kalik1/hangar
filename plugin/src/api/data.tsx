@@ -9,7 +9,7 @@ import { K8s } from '@kinvolk/headlamp-plugin/lib';
 import React from 'react';
 import { checkUntil, tasks, UntilWorld } from '../model/tasks';
 import { Obj } from '../model/types';
-import { key, powerState } from '../model/vm';
+import { key, launcherVmName, powerState } from '../model/vm';
 import { CephBlockPool, CephCluster } from './cephResources';
 import { currentCluster } from './client';
 import { advanceDiskMove } from './move';
@@ -189,7 +189,7 @@ const Lists = React.memo(function Lists({
       idx.restores.set(k, [...(idx.restores.get(k) ?? []), r]);
     }
     for (const p of launchers.items) {
-      const vmName = p.metadata.labels?.['vm.kubevirt.io/name'] ?? p.metadata.labels?.['kubevirt.io/domain'];
+      const vmName = launcherVmName(p);
       if (!vmName) continue;
       const k = `${p.metadata.namespace}/${vmName}`;
       const prev = idx.launcher.get(k);

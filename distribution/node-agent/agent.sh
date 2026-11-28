@@ -317,6 +317,14 @@ gather_records() {
   rd "$PROC/cmdline"
   rec K cmdline "$RV" >>"$R"
   rec K kernel "$(uname -r)" >>"$R"
+  # firewalld lets in only what it is told: published host ports (NodePorts,
+  # 30000-32767) need opening there (hostPID: the host's processes).
+  fw=0
+  for c in "$PROC"/[0-9]*/comm; do
+    rd "$c"
+    [ "$RV" = firewalld ] && fw=1 && break
+  done
+  rec K firewalld "$fw" >>"$R"
   ng=$(ls "$SYS/kernel/iommu_groups" 2>/dev/null | wc -l)
   rec K iommuGroups "$ng" >>"$R"
   [ -d "$SYS/bus/pci/drivers/vfio-pci" ] && rec K vfio 1 >>"$R"

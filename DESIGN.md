@@ -71,8 +71,11 @@ history keeps growing, the tasks keep being followed.
   when KubeVirt reports RestartRequired, then tabs:
   - Summary: guest (agent: OS, hostname, kernel, IPs, users, filesystems
     with usage), hardware and devices, notes (edit in place), tags, usage,
-    placement and policies (host, folder, power policy, maintenance
-    behaviour, live-migration capability and why not), recent tasks.
+    "Reachable at" (each address the VM answers on, with the line to copy:
+    `ssh -p 30022 user@host`, `http://192.0.2.10/`, the cluster DNS name, its
+    own address on a secondary network), placement and policies (host,
+    folder, power policy, maintenance behaviour, live-migration capability
+    and why not), recent tasks.
   - Console: graphical (noVNC) and serial (xterm.js) consoles, embedded or
     in their own browser window (a pop-up on the route
     `/hangar-console/:namespace/:name/:kind`, no app bar or sidebar, one
@@ -158,7 +161,7 @@ history keeps growing, the tasks keep being followed.
     search domains, the hosts' domains — and the VM's dnsPolicy/dnsConfig:
     cluster first, the host's servers, or only listed servers; also in the
     wizard's Network step); boot order; power policy, maintenance behaviour, shutdown timeout, host
-    pinning; tags; cloud-init.
+    pinning; tags; cloud-init. **Published ports** (below).
   - Snapshots: take, revert, delete.
   - Monitor: CPU and memory over the last 30 minutes.
   - Events: of the VM and everything behind it, in plain words.
@@ -303,8 +306,50 @@ history keeps growing, the tasks keep being followed.
 - **Networks**: the pod network and the Multus networks parsed from their
   CNI config (type, bridge, VLAN, MTU, folders, VMs using them); create a
   bridge/OVS network offering only what the hosts have (nmstate
-  NodeNetworkState, ovs-cni resources); delete when unused; a per-host
-  panel of NICs, bonds, VLANs and bridges.
+  NodeNetworkState, ovs-cni resources); delete when unused; every
+  published port of the datacenter (`/hangar/networks/ports`: VM, port,
+  how, address, state, conflicts: a guest port published twice the same
+  way, an address and port two Services claim, a Service whose VM is
+  gone); a per-host panel of NICs, bonds, VLANs and bridges.
+- **Published ports** (VM → Configure; `src/model/ports.ts`,
+  `src/api/ports.ts`): a Service per VM and way of publishing,
+  `<vm>-cluster` (ClusterIP, "inside the cluster"), `<vm>-nodeport`
+  (NodePort, "on every host's port") and `<vm>-lb` (LoadBalancer, "on an
+  address of its own", `allocateLoadBalancerNodePorts: false`), labelled
+  `app.kubernetes.io/managed-by: hangar` and `hangar.magesgate.com/vm`, owned
+  by the VM (controller, blockOwnerDeletion false, as `virtctl expose`
+  from KubeVirt v1.9), so deleting the VM deletes them. Other Services that
+  select the VM's pod show read-only. Ports: presets in the order the guest
+  OS suits (SSH first for Linux, RDP and WinRM for Windows), lists and
+  ranges expanded to one Service entry each (at most 100 at once), TCP or
+  UDP; duplicates and guest ports the VM already publishes that way are
+  refused; a chosen host port is checked against the Services the user can
+  see. Only a pod-network adapter with masquerade or passt publishes (a
+  pod bridge has no pod address; Multus adapters have their own address,
+  shown instead). When the adapter lists `ports` (or `portRanges`), only
+  those reach the guest: Hangar adds the published ones (a VM edit, at the
+  next restart, with "Restart now"); a published port missing from the
+  list is flagged on its row. LoadBalancer pools: MetalLB IPAddressPools
+  and Cilium CiliumLoadBalancerIPPools with their free addresses (the
+  controller's count, `status.availableIPv4` or `cilium.io/IPsAvailable`),
+  those that cannot serve the VM's Service with the reason
+  (serviceAllocation, serviceSelector, turned off, full), never
+  `k4all-ingress-pool`; with no usable pool the mode is off and says what
+  an admin creates for the CNI. Hangar always names the MetalLB pool
+  (`metallb.io/address-pool`), so MetalLB never picks the ingress's; a
+  Cilium pick with MetalLB also installed gets Cilium's class
+  `io.cilium/l2-announcer`, which MetalLB leaves alone. Each row's live
+  state, from objects polled every 5 s while the panel is open: the
+  Service (the publish change's pending → done | failed row), the VM behind
+  it (EndpointSlices: ready, not ready yet, off, its pod not selected), the
+  allocated host port and every host's address (IPv4 unless the guest has
+  IPv6) with firewalld's warning (the node agent reports it; k4all's
+  `k4all-cni-firewalld` opens only the CNI's ports), the LoadBalancer
+  waiting / assigned (address, pool) / announced (MetalLB: ServiceL2Status
+  or the speaker's `nodeAssigned` Event; Cilium: the holder of the lease
+  `cilium-l2announce-<ns>.<svc>` in kube-system) / failed (MetalLB
+  `AllocationFailed`, Cilium `cilium.io/IPAMRequestSatisfied=False`, in
+  words). Every change is also a task.
 - **Flavors** (`/hangar/flavors/vm|cpu|tuning`):
   - VM flavors: KubeVirt instancetypes grouped in families with plain names
     (Balanced, Burstable, CPU intensive, Memory intensive, Network
@@ -553,6 +598,15 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
   namespace (found in testing).
 - No custom font: Headlamp's font keeps the plugin at home in Headlamp and
   air-gap friendly.
+- Published ports select KubeVirt's `vmi.kubevirt.io/id` label, which every
+  virt-launcher pod carries from KubeVirt v1.7 (the VMI name, hashed past 63
+  characters; v1.9.1 `pkg/virt-controller/services/template.go:1739`,
+  `pkg/apimachinery/labels.go`), not `vm.kubevirt.io/name` (deprecated, the
+  pod's hostname: `spec.hostname` when the VM sets one) nor
+  `kubevirt.io/domain` (a pod annotation). Before v1.7 Hangar adds its own
+  template label `hangar.magesgate.com/vm`, which reaches the pod at the
+  next start. A launcher pod's VM is its owner (the VMI), for the same
+  reason.
 
 ## 7. Known limits
 
@@ -582,6 +636,13 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
   stay open until the upload ends.
 - A revert that first shuts the VM down runs in the browser: closing it
   midway leaves the VM off without reverting.
+- Published ports: Hangar cannot see the guest's firewall; the guest must
+  listen on the port and allow it. Who announces a LoadBalancer address
+  needs reading MetalLB's `servicel2statuses` or Cilium's leases in
+  kube-system, which Hangar's roles do not grant (MetalLB's `nodeAssigned`
+  Event covers its first hour). Port ranges are one Service entry each (a
+  Service has no ranges), at most 100 at a time. SCTP is not in KubeVirt's
+  port list.
 - With Cilium, its `cni-exclusive` setting disables Multus: networks
   can be created but VMs get no secondary NIC until it is turned off.
 - With Cilium's kube-proxy replacement, VMs on the pod network

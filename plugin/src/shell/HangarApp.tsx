@@ -93,7 +93,7 @@ function Main() {
     case 'storage':
       return <StorageView section={nav.a} folder={nav.b} />;
     case 'networks':
-      return <NetworksView />;
+      return <NetworksView section={nav.a} />;
     case 'library':
       // The library is Storage → Images now; old links keep working.
       return <Redirect to={hrefFor('storage', 'images')} />;

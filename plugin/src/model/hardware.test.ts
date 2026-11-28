@@ -47,6 +47,9 @@ describe('inventory', () => {
     const empty = parseInventory('{"node":"x"}');
     expect(empty.pci).toEqual([]);
     expect(empty.iommuGroups).toBeNull();
+    // An agent from before firewalld was reported does not tell.
+    expect(empty.firewalld).toBeNull();
+    expect(parseInventory('{"node":"x","firewalld":true}').firewalld).toBe(true);
   });
 
   it('classifies devices', () => {

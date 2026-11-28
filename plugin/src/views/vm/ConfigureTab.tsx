@@ -55,6 +55,7 @@ import { DnsPanel } from './DnsPanel';
 import { CpuFlagsDialog, DiskIoDialog, DiskSettingsDialog, flagsSummary, ioSummary, MachineDialog, ReservationDialog, reservationSummary } from './hardwareDialogs';
 import { MoveDiskDialog } from './MoveDiskDialog';
 import { OptionsPanel } from './OptionsPanel';
+import { PortsPanel } from './PortsPanel';
 import { SharedFoldersPanel } from './SharedFoldersPanel';
 
 /* ------------------------------------------------------------- dialogs */
@@ -887,6 +888,8 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
             <Switch size="small" checked={mq} onChange={e => quiet(saveVm(vm, e.target.checked ? 'Turn on network multi-queue' : 'Turn off network multi-queue', O.setDevices(vm, { nicMultiQueue: e.target.checked })))} inputProps={{ 'aria-label': 'Network multi-queue' }} />
           </Box>
         </Panel>
+
+        {!tpl && <PortsPanel vm={vm} />}
 
         <DevicesPanel vm={vm} />
 

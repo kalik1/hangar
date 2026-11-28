@@ -1,7 +1,8 @@
 /*
  * Networks: the pod network (NAT) and the VM networks on host bridges
  * (Multus NetworkAttachmentDefinitions), with their bridge, VLAN, MTU and
- * VMs; then the hosts' own interfaces from nmstate.
+ * VMs; every published port of the VMs (Services); then the hosts' own
+ * interfaces from nmstate.
  */
 
 import { Icon } from '@iconify/react';
@@ -23,8 +24,9 @@ import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
 import { Note, srOnly } from '../storage/parts';
 import { CreateNetworkDialog } from './CreateNetworkDialog';
+import { PublishedPorts } from './PublishedPorts';
 
-export function NetworksView() {
+export function NetworksView({ section }: { section?: string } = {}) {
   const d = useHangar();
   const t = useTokens();
   const k8s = useK8s();
@@ -190,6 +192,7 @@ export function NetworksView() {
           </Empty>
         )}
       </Box>
+      <PublishedPorts focus={section === 'ports'} />
       <HostNetworks d={d} />
     </Box>
   );

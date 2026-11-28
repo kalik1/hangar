@@ -12,7 +12,7 @@ import React from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { useHangar } from '../../api/data';
 import { Obj } from '../../model/types';
-import { claimNames, key } from '../../model/vm';
+import { claimNames, key, launcherVmName } from '../../model/vm';
 import { K8sName, Panel } from '../../ui/kit';
 import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
@@ -73,7 +73,7 @@ export function KubernetesTab({ vm }: { vm: Obj }) {
   const rows: [string, Obj][] = [['VirtualMachine', { apiVersion: 'kubevirt.io/v1', ...vm }]];
   const vmi = d.idx.vmi.get(k);
   if (vmi) rows.push(['VirtualMachineInstance', { apiVersion: 'kubevirt.io/v1', ...vmi }]);
-  for (const p of d.launchers.filter(p => p.metadata.namespace === vm.metadata.namespace && p.metadata.labels?.['vm.kubevirt.io/name'] === vm.metadata.name))
+  for (const p of d.launchers.filter(p => p.metadata.namespace === vm.metadata.namespace && launcherVmName(p) === vm.metadata.name))
     rows.push(['Pod', p]);
   for (const c of claimNames(vm)) {
     const dv = d.idx.dv.get(`${vm.metadata.namespace}/${c}`);
