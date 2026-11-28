@@ -151,6 +151,18 @@ describe('Published ports panel', () => {
     expect(screen.getByText(/firewalld runs on host-a/)).toBeTruthy();
   });
 
+  it('an address with no known announcer: assigned, and the tooltip says what "announced" needs', () => {
+    const prev = state.world.announcers;
+    state.world.announcers = new Map();
+    try {
+      show(vm(listed));
+      expect(screen.getByText(/203.0.113.5 from pool cil; no host announces it yet/)).toBeTruthy();
+      expect(screen.getByLabelText(/servicel2statuses .* Hangar's roles do not grant them/)).toBeTruthy();
+    } finally {
+      state.world.announcers = prev;
+    }
+  });
+
   it("says which ports the adapter's list forwards, and flags a published port missing from it", () => {
     show(vm(listed));
     expect(screen.getByText(/default forwards only the ports in its list \(80\/TCP\)/)).toBeTruthy();

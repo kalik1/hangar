@@ -122,12 +122,12 @@ describe('the issuers', () => {
   it('an ACME HTTP-01 issuer cannot pass for a nip.io name of a private address, and says so', () => {
     const le = W.issuerList([ci('letsencrypt', 'True', { acme: { server: 'https://acme.example/dir', solvers: [{ http01: { ingress: {} } }] } })], []).rows[0];
     expect(le).toMatchObject({ acme: true, http01: true });
-    expect(W.acmeProblem(le, 'web1-lab.192.168.5.10.nip.io')).toMatch(/cannot reach 192.168.5.10, a private address/);
+    expect(W.acmeProblem(le, 'web1-demo.10.11.12.13.nip.io')).toMatch(/cannot reach 10.11.12.13, a private address/);
     expect(W.acmeProblem(le, 'web1-lab.10-1-2-3.sslip.io')).toMatch(/10.1.2.3/);
     expect(W.acmeProblem(le, 'web1-lab.203.0.113.5.nip.io')).toBeNull();
     expect(W.acmeProblem(le, 'www.example.com')).toBeNull();
     const ca = W.issuerList([ci('lab-ca', 'True')], []).rows[0];
-    expect(W.acmeProblem(ca, 'web1-lab.192.168.5.10.nip.io')).toBeNull();
+    expect(W.acmeProblem(ca, 'web1-demo.10.11.12.13.nip.io')).toBeNull();
   });
 });
 

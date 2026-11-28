@@ -32,7 +32,7 @@ import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
 import { Note } from '../storage/parts';
 import { Help } from './configParts';
-import { CopyButton, FirewalldNote, lbWords, LiveLabel, MODE_ICON, rowCopyLine, rowLive, useVmPorts, VmPorts, whereText } from './portParts';
+import { CopyButton, FirewalldNote, LbLine, LiveLabel, MODE_ICON, rowCopyLine, rowLive, useVmPorts, VmPorts, whereText } from './portParts';
 import { PublishDialog, PublishSubmit } from './PublishDialog';
 import { WebLine } from './WebLine';
 
@@ -290,8 +290,7 @@ function PortLine({ row, vm, ports, canChange, canEditVm, onVmChanged }: { row: 
             {hosts.length > 4 ? `, and ${hosts.length - 4} more` : ''}
           </Box>
         )}
-        {live.lb && <Box sx={{ color: live.lb.phase === 'failed' ? '#C53030' : undefined }}>{lbWords(live.lb, svc)}</Box>}
-        {live.lb?.phase === 'assigned' && ports.world.denied.announcers && <Box>Hangar cannot read who announces it (your role).</Box>}
+        {live.lb && <LbLine lb={live.lb} svc={svc} />}
         {svc.spec?.externalTrafficPolicy === 'Local' && <Box>Keeps the client's address: only the host the VM runs on answers.</Box>}
         {!row.managed && <Box>Service {svc.metadata.name} selects this VM: change it where it was made.</Box>}
         {k8s && row.managed && (
