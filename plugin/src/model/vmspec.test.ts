@@ -1,5 +1,21 @@
 import { addNic } from './edit';
-import { buildVm, cloudInitUserData, copyVm, localMac, nameProblem, slugify, withHostname, WizardInput } from './vmspec';
+import {
+  buildVm,
+  CLOUD_INIT_INLINE_MAX,
+  cloudInitOverflow,
+  cloudInitRefusal,
+  cloudInitSecret,
+  cloudInitUserData,
+  copiedCloudInit,
+  copyVm,
+  localMac,
+  nameProblem,
+  slugify,
+  userNameProblem,
+  withCloudInitSecret,
+  withHostname,
+  WizardInput,
+} from './vmspec';
 
 const LOCAL_MAC = /^02(:[0-9a-f]{2}){5}$/;
 
@@ -109,12 +125,155 @@ describe('buildVm', () => {
     expect(plain.spec.template.metadata.labels['k4all.magesgate.com/metadata']).toBeUndefined();
     expect(plain.spec.template.spec.domain.chassis).toBeUndefined();
   });
-  it('writes cloud-config with keys and password', () => {
-    const u = cloudInitUserData({ user: 'admin', password: 'p"w', sshKeys: ['k1', ' '] }, 'h');
-    expect(u).toContain('user: admin');
-    expect(u).toContain('password: "p\\"w"');
-    expect(u).toContain('- "k1"');
-    expect(u).not.toContain('- ""');
+});
+
+describe('cloudInitUserData (hangar#7)', () => {
+  const KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample me@laptop';
+  const AGENT = '  - [sh, -c, "systemctl enable --now qemu-guest-agent || rc-update add qemu-guest-agent default || true"]';
+  const form = { user: 'k4all', password: 's3cret', sshKeys: [KEY, ' '] };
+  const userBlock = (shell: boolean) => [
+    'users:',
+    '  - name: k4all',
+    '    sudo: "ALL=(ALL) NOPASSWD:ALL"',
+    ...(shell ? ['    shell: /bin/bash'] : []),
+    '    lock_passwd: false',
+    '    plain_text_passwd: "s3cret"',
+    '    ssh_authorized_keys:',
+    `      - "${KEY}"`,
+    'ssh_pwauth: true',
+  ];
+
+  it('Fedora, CentOS Stream, RHEL: the users list with k4all, no packages (the agent is in the image)', () => {
+    const want = ['#cloud-config', 'hostname: web-03', ...userBlock(true), 'runcmd:', AGENT, ''].join('\n');
+    for (const os of ['fedora', 'centos', 'rhel']) expect(cloudInitUserData(form, 'web-03', os)).toBe(want);
+  });
+
+  it('Ubuntu and Debian: the same, and packages installs the agent', () => {
+    const want = ['#cloud-config', 'hostname: web-03', ...userBlock(true), 'packages: [qemu-guest-agent]', 'runcmd:', AGENT, ''].join('\n');
+    expect(cloudInitUserData(form, 'web-03', 'ubuntu')).toBe(want);
+    expect(cloudInitUserData(form, 'web-03', 'debian')).toBe(want);
+  });
+
+  it('Alpine and an unknown OS: no shell (the image’s default), no packages', () => {
+    const want = ['#cloud-config', 'hostname: web-03', ...userBlock(false), 'runcmd:', AGENT, ''].join('\n');
+    expect(cloudInitUserData(form, 'web-03', 'alpine')).toBe(want);
+    expect(cloudInitUserData(form, 'web-03')).toBe(want);
+  });
+
+  it('never writes the deprecated user: key', () => {
+    for (const os of ['fedora', 'ubuntu', 'debian', 'alpine', undefined]) expect(cloudInitUserData(form, 'h', os)).not.toMatch(/^user:/m);
+  });
+
+  it('without a password the user keeps a locked password and logs in with its keys', () => {
+    expect(cloudInitUserData({ user: 'k4all', sshKeys: [KEY] }, 'h', 'fedora')).toBe(
+      [
+        '#cloud-config',
+        'hostname: h',
+        'users:',
+        '  - name: k4all',
+        '    sudo: "ALL=(ALL) NOPASSWD:ALL"',
+        '    shell: /bin/bash',
+        '    ssh_authorized_keys:',
+        `      - "${KEY}"`,
+        'runcmd:',
+        AGENT,
+        '',
+      ].join('\n')
+    );
+  });
+
+  it('without a user the image’s default user gets the password and keys', () => {
+    expect(cloudInitUserData({ password: 'p"w', sshKeys: ['k1', ' '] }, 'h', 'ubuntu')).toBe(
+      [
+        '#cloud-config',
+        'hostname: h',
+        'password: "p\\"w"',
+        'chpasswd: { expire: false }',
+        'ssh_pwauth: true',
+        'ssh_authorized_keys:',
+        '  - "k1"',
+        'packages: [qemu-guest-agent]',
+        'runcmd:',
+        AGENT,
+        '',
+      ].join('\n')
+    );
+  });
+
+  it('quotes a user name that is not a plain Linux name, and the wizard flags it', () => {
+    expect(cloudInitUserData({ user: 'Bad: name' }, 'h', 'fedora')).toContain('  - name: "Bad: name"');
+    expect(userNameProblem('Bad: name')).toMatch(/lowercase/);
+    expect(userNameProblem('k4all')).toBeNull();
+    expect(userNameProblem('')).toBeNull();
+  });
+
+  it('returns custom user data unchanged', () => {
+    expect(cloudInitUserData({ custom: '#cloud-config\nusers: [default]\n', user: 'k4all' }, 'h', 'ubuntu')).toBe('#cloud-config\nusers: [default]\n');
+  });
+
+  it('buildVm passes the guest OS: an Ubuntu VM installs the agent', () => {
+    const ud = (osId?: string) => buildVm({ ...base, osId, cloudInit: { user: 'k4all' } }).spec.template.spec.volumes.find((v: any) => v.name === 'cloudinitdisk').cloudInitNoCloud.userData;
+    expect(ud('ubuntu')).toContain('packages: [qemu-guest-agent]');
+    expect(ud('fedora')).not.toContain('packages:');
+  });
+});
+
+describe('cloud-init over KubeVirt’s inline limit (hangar#7)', () => {
+  /** Custom user data of exactly n bytes (ASCII). */
+  const sized = (n: number) => '#cloud-config\n#' + 'x'.repeat(n - 16) + '\n';
+  const vmWith = (userData: string) => buildVm({ ...base, cloudInit: { custom: userData } });
+
+  it('keeps 2048 bytes inline and moves 2049 bytes out', () => {
+    expect(sized(2048).length).toBe(2048);
+    expect(cloudInitOverflow(vmWith(sized(CLOUD_INIT_INLINE_MAX)))).toEqual([]);
+    const over = cloudInitOverflow(vmWith(sized(2049)));
+    expect(over).toEqual([{ volume: 'cloudinitdisk', data: { stringData: { userdata: sized(2049) } }, bytes: 2049 }]);
+  });
+
+  it('counts bytes, not characters, as KubeVirt does', () => {
+    const two = '#cloud-config\n#' + 'é'.repeat(1) + 'x'.repeat(2048 - 16 - 2) + '\n'; // 2047 characters, 2048 bytes
+    expect(cloudInitOverflow(vmWith(two))).toEqual([]);
+    expect(cloudInitOverflow(vmWith(two.replace('x', 'é')))[0].bytes).toBe(2049);
+  });
+
+  it('measures userDataBase64 decoded, and keeps it base64 in the Secret', () => {
+    const vm = buildVm(base);
+    const b64 = btoa(sized(2049));
+    vm.spec.template.spec.volumes.push({ name: 'ci2', cloudInitConfigDrive: { userDataBase64: b64 } } as any);
+    expect(cloudInitOverflow(vm)).toEqual([{ volume: 'ci2', data: { data: { userdata: b64 } }, bytes: 2049 }]);
+  });
+
+  it('the Secret: generated name, the VM’s folder, the key KubeVirt reads; the VM refers to it instead', () => {
+    const vm = vmWith(sized(3000));
+    const [o] = cloudInitOverflow(vm);
+    expect(cloudInitSecret(vm, o)).toEqual({
+      apiVersion: 'v1',
+      kind: 'Secret',
+      metadata: { generateName: 'web-03-cloudinit-', namespace: 'prod', labels: { 'hangar.magesgate.com/cloud-init-of': 'web-03', 'app.kubernetes.io/managed-by': 'hangar' } },
+      type: 'Opaque',
+      stringData: { userdata: sized(3000) },
+    });
+    const out = withCloudInitSecret(vm, 'cloudinitdisk', 'web-03-cloudinit-abcde');
+    expect(out.spec.template.spec.volumes.find((v: any) => v.name === 'cloudinitdisk')).toEqual({ name: 'cloudinitdisk', cloudInitNoCloud: { secretRef: { name: 'web-03-cloudinit-abcde' } } });
+    expect(vm.spec.template.spec.volumes.find((v: any) => v.name === 'cloudinitdisk').cloudInitNoCloud.userData).toBe(sized(3000));
+    expect(cloudInitOverflow(out)).toEqual([]);
+  });
+
+  it('says why it refuses', () => {
+    const [o] = cloudInitOverflow(vmWith(sized(2400)));
+    expect(cloudInitRefusal(o, 'Not allowed: secrets is forbidden')).toBe(
+      'The cloud-init user data is 2,400 bytes, more than the 2,048 KubeVirt takes inline, and Hangar could not keep it in a Secret: Not allowed: secrets is forbidden'
+    );
+  });
+
+  it('a copy takes the source’s Secret-held user data into a Secret of its own, with its hostname, whatever its size', () => {
+    const src = withCloudInitSecret(vmWith('#cloud-config\nhostname: web-03\n'), 'cloudinitdisk', 'web-03-cloudinit-abcde');
+    const copy = copyVm(src, { name: 'web-09', namespace: 'test', runStrategy: 'Halted', pvcs: new Map() });
+    expect(copy.spec.template.spec.volumes.find((v: any) => v.name === 'cloudinitdisk').cloudInitNoCloud).toEqual({ secretRef: { name: 'web-03-cloudinit-abcde' } });
+    const [o] = copiedCloudInit(copy, new Map([['cloudinitdisk', '#cloud-config\nhostname: web-03\n']]));
+    expect(o).toEqual({ volume: 'cloudinitdisk', data: { stringData: { userdata: '#cloud-config\nhostname: web-09\n' } }, bytes: 31, copied: true });
+    expect(cloudInitRefusal(o, 'denied')).toBe('The source keeps its cloud-init user data in a Secret, and Hangar could not make one for the copy: denied');
+    expect(copiedCloudInit(copy, new Map())).toEqual([]);
   });
 });
 

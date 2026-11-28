@@ -147,7 +147,18 @@ history keeps growing, the tasks keep being followed.
   container registry, empty disk), CPU and memory (custom or size profile,
   firmware, TPM), disks and datastore, network adapters, guest
   customization (form or own cloud-config), review with power policy and
-  maintenance behaviour, Create (or Review YAML). On k4all, guest
+  maintenance behaviour, Create (or Review YAML). The form adds the user
+  `k4all` by default as a `users:` entry (cloud-init deprecates `user:`)
+  with what an image's default user has (sudo without a password, bash
+  where the OS has it), its password and SSH keys; with the user field
+  empty the image's own default user gets them. Ubuntu and Debian images
+  lack the QEMU guest agent: `packages` installs it. KubeVirt refuses
+  inline user data over 2,048 bytes (`cloudInitUserMaxLen`): `createVm`
+  (`api/cloudInit.ts`) keeps longer user data in a Secret of the VM's
+  folder (`cloudInitNoCloud.secretRef`, key `userdata`, owned by the VM)
+  and refuses with the reason when it cannot make it; the review says so.
+  Making the Secret needs `create` on Secrets in the folder, which
+  Hangar's own roles do not give. On k4all, guest
   customization also asks for k4all's metadata service on 169.254.169.254
   (on by default when k4all's ClusterConfig turns it on:
   `spec.features.virt.metadata.enabled`, read instead of looking for the
@@ -178,7 +189,9 @@ history keeps growing, the tasks keep being followed.
 - **Clone, clone to template, new VM from template**: every persistent disk
   is copied with CDI; the copy gets a new fixed MAC on its NAT adapters
   (none on the others), a new firmware UUID and serial, and its own
-  hostname in cloud-init.
+  hostname in cloud-init. User data the source keeps in a Secret is read
+  (when the user may) into a Secret of the copy's own: never inline, where
+  anyone who may read the VM would see it.
 - **Hosts**: list with state, VMs, CPU and memory usage, hardware; host
   page with resources (used and allocated), its VMs and whether each can
   move live, usage charts, events, **Enter/Exit maintenance mode**.

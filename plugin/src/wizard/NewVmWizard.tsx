@@ -43,7 +43,19 @@ import { preferredDatastore } from '../model/placement';
 import { cidrConflicts, DEFAULT_VM_CIDR, freeVmCidr } from '../model/podnet';
 import { formatBytes, GiB, MiB, parseQuantity } from '../model/units';
 import { RUN_STRATEGIES } from '../model/vm';
-import { BootSource, buildVm, localMac, nameProblem, WizardDisk, WizardInput, WizardNic } from '../model/vmspec';
+import {
+  BootSource,
+  buildVm,
+  CLOUD_INIT_INLINE_MAX,
+  cloudInitOverflow,
+  DEFAULT_USER,
+  localMac,
+  nameProblem,
+  userNameProblem,
+  WizardDisk,
+  WizardInput,
+  WizardNic,
+} from '../model/vmspec';
 import { hrefFor } from '../shell/nav';
 import { useK8s, useSettings } from '../shell/settings';
 import { K8sName,KV } from '../ui/kit';
@@ -268,7 +280,7 @@ function initialState(d: HangarData, preset: WizardPreset, libraryNs: string): S
     dnsOpen: false,
     clipboard: false,
     ciEnabled: os.cloudInit,
-    ciUser: 'admin',
+    ciUser: DEFAULT_USER,
     ciPassword: '',
     ciKeys: '',
     ciCustom: '',
@@ -362,7 +374,14 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
         : null,
     storage: s.rootGiB < minRoot ? `The image needs at least ${minRoot} GiB.` : null,
     network: s.nics.some(n => !n.network) && dnsProblems(s.dns, clusterDns?.servers.length || 1).length ? 'Fix the DNS settings.' : null,
-    customize: mdOn ? (serviceAccountProblem(s.serviceAccount.trim()) ? `ServiceAccount: ${serviceAccountProblem(s.serviceAccount.trim())}` : null) : null,
+    customize:
+      useCloudInit && s.ciMode !== 'custom' && userNameProblem(s.ciUser.trim())
+        ? `User: ${userNameProblem(s.ciUser.trim())}`
+        : mdOn
+        ? serviceAccountProblem(s.serviceAccount.trim())
+          ? `ServiceAccount: ${serviceAccountProblem(s.serviceAccount.trim())}`
+          : null
+        : null,
     review: null,
   };
   const stepOk = (i: number) => !problems[STEPS[i].id];
@@ -412,7 +431,7 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
       cloudInit: useCloudInit
         ? s.ciMode === 'custom'
           ? { custom: s.ciCustom }
-          : { user: s.ciUser || undefined, password: s.ciPassword || undefined, sshKeys: s.ciKeys.split('\n'), hostname: s.name }
+          : { user: s.ciUser.trim() || undefined, password: s.ciPassword || undefined, sshKeys: s.ciKeys.split('\n'), hostname: s.name }
         : undefined,
       runStrategy: s.powerOn || s.runStrategy === 'Manual' ? s.runStrategy : 'Halted',
       evictionStrategy: s.eviction || undefined,
@@ -912,8 +931,15 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
                     <Field label="Hostname">
                       <Box sx={{ fontSize: 14, pt: 1 }}>{s.name || '(the VM name)'}</Box>
                     </Field>
-                    <Field label="User">
-                      <TextField size="small" value={s.ciUser} onChange={e => set({ ciUser: e.target.value })} inputProps={{ 'aria-label': 'User' }} />
+                    <Field label="User" help="Added with sudo rights. Empty: the image's own default user gets the password and keys.">
+                      <TextField
+                        size="small"
+                        value={s.ciUser}
+                        onChange={e => set({ ciUser: e.target.value })}
+                        error={!!userNameProblem(s.ciUser.trim())}
+                        helperText={userNameProblem(s.ciUser.trim()) ?? undefined}
+                        inputProps={{ 'aria-label': 'User' }}
+                      />
                     </Field>
                     <Field label="Password" help="Stored in the VM settings: prefer SSH keys.">
                       <TextField size="small" type="password" value={s.ciPassword} onChange={e => set({ ciPassword: e.target.value })} inputProps={{ 'aria-label': 'Password' }} autoComplete="new-password" />
@@ -935,6 +961,8 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
       }
       default: {
         const w = input();
+        // Over KubeVirt's inline limit, createVm keeps the user data in a Secret.
+        const ciOverflow = cloudInitOverflow(buildVm(w))[0];
         const src =
           s.sourceKind === 'image'
             ? `Copy of ${selectedImg?.displayName}`
@@ -962,7 +990,13 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
                 ...(s.nics.some(n => !n.network) && !isDefaultDns(s.dns)
                   ? [['DNS', [DNS_POLICIES.find(p => p.value === s.dns.policy)!.label, ...s.dns.nameservers, ...s.dns.searches.map(x => `search ${x}`)].join(', ')] as [string, string]]
                   : []),
-                ['Customization', useCloudInit ? (s.ciMode === 'custom' ? 'Your cloud-config' : `User ${s.ciUser || '(image default)'}${s.ciKeys.trim() ? ', SSH keys' : ''}${s.ciPassword ? ', password' : ''}`) : 'None'],
+                [
+                  'Customization',
+                  useCloudInit
+                    ? (s.ciMode === 'custom' ? 'Your cloud-config' : `User ${s.ciUser.trim() || '(image default)'}${s.ciKeys.trim() ? ', SSH keys' : ''}${s.ciPassword ? ', password' : ''}`) +
+                      (ciOverflow ? `; ${ciOverflow.bytes.toLocaleString('en-US')} bytes, kept in a Secret (KubeVirt takes ${CLOUD_INIT_INLINE_MAX.toLocaleString('en-US')} inline)` : '')
+                    : 'None',
+                ],
                 ...(k4.on ? [['Metadata service', mdOn ? `On, ServiceAccount ${s.serviceAccount.trim() || 'default'}` : 'Off'] as [string, string]] : []),
               ]}
             />

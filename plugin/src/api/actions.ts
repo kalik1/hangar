@@ -8,6 +8,7 @@ import { alignedClipboardSidecars, clipboardOnVm, HOOK_ANNOTATION, sidecarImage 
 import { Task, tasks, TaskTarget, Until } from '../model/tasks';
 import { Obj, VM } from '../model/types';
 import { errorText, kdelete, kjsonpatch, kmerge, kpost, kput, kreq } from './client';
+import { createWithCloudInit } from './cloudInit';
 import { PATHS } from './resources';
 
 export interface RunOptions {
@@ -307,7 +308,12 @@ function isTemplateVm(vm: VM) {
   return vm.metadata.labels?.['hangar.magesgate.com/template'] === 'true';
 }
 
-export function createVm(vm: VM, title = 'Create VM') {
+/**
+ * Creates a VM. cloud-init user data over KubeVirt's inline limit, and the
+ * user data `copied` from the source VM's Secrets, go into Secrets of its
+ * own (api/cloudInit.ts).
+ */
+export function createVm(vm: VM, title = 'Create VM', copied?: Map<string, string>) {
   const namespace = vm.metadata.namespace as string;
   return runTask(
     {
@@ -315,7 +321,7 @@ export function createVm(vm: VM, title = 'Create VM') {
       target: { kind: 'vm', namespace, name: vm.metadata.name },
       until: { type: 'vmExists', namespace, name: vm.metadata.name },
     },
-    () => kpost(PATHS.vm(namespace), vm)
+    () => createWithCloudInit(vm, v => kpost(PATHS.vm(namespace), v), copied)
   );
 }
 

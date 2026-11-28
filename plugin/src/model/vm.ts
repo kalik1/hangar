@@ -408,6 +408,17 @@ const OS_NAMES: Record<string, string> = {
   legacy: 'Other',
 };
 
+/** Whose cloud images ship without the QEMU guest agent: cloud-init installs it (model/vmspec.ts). */
+const NO_GUEST_AGENT = new Set(['ubuntu', 'debian']);
+/** Whose images have bash, the shell of their default user. */
+const BASH = new Set(['fedora', 'rhel', 'centos', 'ubuntu', 'debian', 'sles', 'opensuse', 'oraclelinux']);
+
+/** The OS's cloud images lack the QEMU guest agent (Ubuntu, Debian). */
+export const lacksGuestAgent = (osId?: string) => NO_GUEST_AGENT.has(osId ?? '');
+
+/** The login shell for a user Hangar adds: bash where the OS has it, else the image's default. */
+export const loginShell = (osId?: string): string | undefined => (BASH.has(osId ?? '') ? '/bin/bash' : undefined);
+
 export function osIdFrom(s: string | undefined): string {
   if (!s) return '';
   const v = s.toLowerCase();

@@ -17,6 +17,7 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import React from 'react';
 import * as A from '../../api/actions';
+import { readCloudInitSecrets } from '../../api/cloudInit';
 import { HangarData } from '../../api/data';
 import { folders } from '../../model/inventory';
 import { Obj } from '../../model/types';
@@ -66,7 +67,8 @@ export function CloneDialog({
   const title =
     mode === 'clone' ? `Clone ${displayName(source)}` : mode === 'template' ? `Clone ${displayName(source)} to a template` : `New VM from ${displayName(source)}`;
   const action = mode === 'clone' ? 'Clone' : mode === 'template' ? 'Create template' : 'Create VM';
-  const submit = () => {
+  const submit = async () => {
+    onClose();
     const vm = copyVm(source, {
       name,
       namespace: ns,
@@ -75,10 +77,11 @@ export function CloneDialog({
       asTemplate: mode === 'template',
       description: desc || undefined,
     });
-    A.createVm(vm, mode === 'deploy' ? 'Deploy from template' : mode === 'template' ? 'Clone to template' : 'Clone VM').catch(
+    // User data kept in the source's Secret: the copy gets a Secret of its own.
+    const copied = await readCloudInitSecrets(source);
+    A.createVm(vm, mode === 'deploy' ? 'Deploy from template' : mode === 'template' ? 'Clone to template' : 'Clone VM', copied).catch(
       () => undefined
     );
-    onClose();
   };
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth aria-labelledby="hangar-clone-title">
