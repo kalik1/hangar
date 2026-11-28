@@ -2,12 +2,13 @@ name: Release
 
 # A tag v<version> on main (version = plugin/package.json):
 # 1. the CI checks;
-# 2. the image ghcr.io/<owner>/hangar-headlamp-plugin:<version> for amd64
-#    and arm64;
+# 2. the images ghcr.io/<owner>/hangar-headlamp-plugin:<version> and
+#    ghcr.io/<owner>/hangar-guest-bridge:<version> for amd64 and arm64;
 # 3. a GitHub Release with the packaged plugin (headlamp-plugin package),
 #    its sha256, its artifacthub-pkg.yml, and the cluster objects for
-#    distributions (hangar-cluster.yaml, hangar-node-agent.yaml:
-#    .github/scripts/cluster-bundles.sh);
+#    distributions (hangar-cluster.yaml, hangar-node-agent.yaml,
+#    hangar-guest-bridge.yaml: .github/scripts/cluster-bundles.sh, the last
+#    one with the bridge image of this release);
 # 4. the Artifact Hub metadata committed to main under
 #    artifacthub/hangar-headlamp-plugin/<version>/.
 #
@@ -29,6 +30,7 @@ concurrency:
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/hangar-headlamp-plugin
+  BRIDGE_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/hangar-guest-bridge
   PACKAGE_NAME: hangar-headlamp-plugin
 
 jobs:
@@ -68,8 +70,10 @@ jobs:
             echo "::notice::${GITHUB_REF_NAME} is a pre-release: the pins in README.md and distribution/ are not checked"
           else
             PRERELEASE=false
-            # Every pinned image reference in the docs and distribution files.
-            OTHER="$(grep -rhoE "${IMAGE_NAME#ghcr.io/*/}:[0-9][0-9A-Za-z.-]*" README.md distribution | sort -u | grep -v ":${VERSION}\$" || true)"
+            # Every pinned image reference in the docs and distribution
+            # files, the plugin's and the guest bridge's.
+            IMAGES="${IMAGE_NAME#ghcr.io/*/}|${BRIDGE_IMAGE_NAME#ghcr.io/*/}"
+            OTHER="$(grep -rhoE "/(${IMAGES}):[0-9][0-9A-Za-z.-]*" README.md distribution | sort -u | grep -v ":${VERSION}\$" || true)"
             if [ -n "${OTHER}" ]; then
               echo "::error::README.md or distribution/ pin another version: ${OTHER}"
               exit 1
@@ -138,9 +142,65 @@ jobs:
             echo "Digest: \`${DIGEST}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  bridge-image:
+    name: Guest bridge image
+    needs: [version, ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The builder cross-compiles on the runner's platform and the final
+      # stage only copies the binary: no emulation is needed.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Containerfile.bridge
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BRIDGE_VERSION=${{ needs.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+          push: true
+          provenance: false
+          # No floating tags: hangar-guest-bridge.yaml pins a version.
+          tags: |
+            ${{ env.BRIDGE_IMAGE_NAME }}:${{ needs.version.outputs.version }}
+          cache-from: type=gha,scope=bridge-image
+
+      - name: Summary
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "### Guest bridge image"
+            echo
+            echo "\`${BRIDGE_IMAGE_NAME}:${VERSION}\`"
+            echo
+            echo "Digest: \`${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   release:
     name: GitHub Release and Artifact Hub metadata
-    needs: [version, ci, image]
+    needs: [version, ci, image, bridge-image]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -176,8 +236,10 @@ jobs:
           (cd plugin && sha256sum "${PACKAGE_NAME}-${VERSION}.tar.gz" > "${PACKAGE_NAME}-${VERSION}.tar.gz.sha256")
           cat "${META}/artifacthub-pkg.yml"
 
+      # hangar-guest-bridge.yaml runs the bridge image pushed above, also
+      # for a release candidate (whose distribution/ keeps the last pins).
       - name: Cluster bundles
-        run: .github/scripts/cluster-bundles.sh "${RUNNER_TEMP}/bundles"
+        run: .github/scripts/cluster-bundles.sh "${RUNNER_TEMP}/bundles" "${BRIDGE_IMAGE_NAME}:${VERSION}"
 
       - name: GitHub Release
         env:
@@ -194,9 +256,10 @@ jobs:
             "artifacthub/${PACKAGE_NAME}/${VERSION}/artifacthub-pkg.yml" \
             "${RUNNER_TEMP}/bundles/hangar-cluster.yaml" \
             "${RUNNER_TEMP}/bundles/hangar-node-agent.yaml" \
+            "${RUNNER_TEMP}/bundles/hangar-guest-bridge.yaml" \
             "${KIND[@]}" \
             --verify-tag --generate-notes --title "Hangar ${VERSION}" \
-            --notes "Image: \`${IMAGE_NAME}:${VERSION}\` (linux/amd64, linux/arm64)."
+            --notes "Images: \`${IMAGE_NAME}:${VERSION}\` and \`${BRIDGE_IMAGE_NAME}:${VERSION}\` (linux/amd64, linux/arm64)."
 
       # Artifact Hub lists released versions only.
       - name: Commit the Artifact Hub metadata to main

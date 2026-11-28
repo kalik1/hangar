@@ -4,13 +4,16 @@
 #   hangar-viewer       sees VMs, hosts, datastores, networks, the library, events,
 #                       ServiceAccounts (the wizard's pick for k4all's metadata service),
 #                       published ports (Services, EndpointSlices, address pools,
-#                       Ingresses and their classes, cert-manager Certificates and issuers)
+#                       Ingresses and their classes, cert-manager Certificates and issuers),
+#                       what a VM's guest agent reports (guestinfo, with the guest bridge)
 #   hangar-vm-operator  + power operations, consoles, migrations, snapshots,
 #                       publishing a VM's ports (Services, Ingresses)
 #   hangar-vm-admin     + creates, edits, clones and deletes VMs, disks, images;
 #                       creates the Secret of a VM whose cloud-init user data is
 #                       longer than KubeVirt takes inline (create only: no role
 #                       here reads, lists or changes Secrets)
+#   hangar-guest-admin  the files inside VMs (guestfiles, with the guest bridge):
+#                       not part of hangar-vm-admin; bind it on its own
 #
 # They complement KubeVirt's and CDI's own aggregated roles
 # (kubevirt.io:view/edit/admin, cdi.kubevirt.io:view/edit/admin).
@@ -27,6 +30,10 @@ rules:
     verbs: [get, list, watch]
   - apiGroups: [subresources.kubevirt.io]
     resources: [virtualmachineinstances/guestosinfo, virtualmachineinstances/userlist, virtualmachineinstances/filesystemlist]
+    verbs: [get]
+  # The guest bridge (distribution/guest-bridge): what the guest agent reports.
+  - apiGroups: [subresources.hangar.magesgate.com]
+    resources: [virtualmachineinstances/guestinfo]
     verbs: [get]
   - apiGroups: [snapshot.kubevirt.io, clone.kubevirt.io, export.kubevirt.io, pool.kubevirt.io]
     resources: ['*']
@@ -168,6 +175,21 @@ rules:
   - apiGroups: [k8s.cni.cncf.io]
     resources: [network-attachment-definitions]
     verbs: [create, update, patch, delete]
+---
+# The files inside VMs, through their guest agent and the guest bridge
+# (distribution/guest-bridge): list, read, write, create, rename, change
+# owners and delete, with the guest agent's rights (root on most guests).
+# It is not part of hangar-vm-admin on purpose: bind it per folder with a
+# RoleBinding, or for some VMs only with a Role of your own that lists them
+# in resourceNames.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hangar-guest-admin
+rules:
+  - apiGroups: [subresources.hangar.magesgate.com]
+    resources: [virtualmachineinstances/guestfiles]
+    verbs: [get, create, update, delete]
 ---
 # Host hardware and device passthrough (host > Hardware, Hosts > Device
 # mappings). Bind it cluster-wide to the people who decide which host

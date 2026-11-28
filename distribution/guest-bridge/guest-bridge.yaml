@@ -1,0 +1,182 @@
+# Hangar guest bridge: one pod per host, serving the aggregated API
+# subresources.hangar.magesgate.com/v1alpha1 (a VM's guest agent, as the
+# subresources guestinfo and guestfiles of KubeVirt's
+# virtualmachineinstances).
+#
+# The API server authenticates the user and checks RBAC on the subresource,
+# then proxies the call to the Service; the pod that gets it serves it when
+# the VM runs on its host, or forwards it to the bridge pod there. Each pod
+# reaches its host's VMs through their launcher pods' libvirt sockets, under
+# the kubelet's pods directory (read-only).
+#
+# The bridge makes its own CA and serving certificate (the Secret
+# hangar-guest-bridge-tls, created at its first start) and sets the
+# APIService's caBundle itself: the APIService below has none, and stays
+# unavailable until a pod is ready.
+#
+# Apply with `kubectl apply -k` on this directory. Remove the APIService
+# first: see ../../README.md, "Guest agent (guest bridge)".
+apiVersion: v1
+kind: Namespace
+metadata:
+  # The same Namespace as the node agent's (../node-agent/node-agent.yaml):
+  # keep the two identical. Removing one bundle must not delete it while
+  # the other is installed.
+  name: hangar-system
+  labels:
+    app.kubernetes.io/part-of: hangar
+    # The node agent is privileged; the bridge runs as spc_t.
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hangar-guest-bridge
+  namespace: hangar-system
+  labels:
+    app.kubernetes.io/name: hangar-guest-bridge
+    app.kubernetes.io/part-of: hangar
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: hangar-guest-bridge
+  namespace: hangar-system
+  labels:
+    app.kubernetes.io/name: hangar-guest-bridge
+    app.kubernetes.io/part-of: hangar
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hangar-guest-bridge
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        # The bridge finds its peers by this label.
+        app.kubernetes.io/name: hangar-guest-bridge
+        app.kubernetes.io/part-of: hangar
+    spec:
+      serviceAccountName: hangar-guest-bridge
+      nodeSelector:
+        kubernetes.io/os: linux
+      # A VM may run on any host, the control plane's included.
+      tolerations:
+        - operator: Exists
+      # The bridge keeps serving 5 s after SIGTERM (--shutdown-delay) while
+      # /readyz fails, then finishes the calls in flight.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        # The launchers' libvirt sockets: root with DAC_OVERRIDE, and
+        # spc_t under SELinux (which needs the privileged Pod Security
+        # level of the namespace); not privileged.
+        runAsUser: 0
+        runAsGroup: 0
+        seLinuxOptions:
+          type: spc_t
+        # The runtime's default filter: the bridge falls back from openat2
+        # where it is refused.
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bridge
+          image: ghcr.io/kalik1/hangar-guest-bridge:0.2.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            # The Service's target, and the port bridge pods forward to.
+            - name: https
+              containerPort: 8443
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 5
+            failureThreshold: 2
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["DAC_OVERRIDE"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: kubelet-pods
+              mountPath: /var/lib/kubelet/pods
+              readOnly: true
+            - name: peer-token
+              mountPath: /var/run/secrets/hangar-guest-bridge
+              readOnly: true
+      volumes:
+        - name: kubelet-pods
+          hostPath:
+            path: /var/lib/kubelet/pods
+            type: Directory
+        # The token a pod sends with each call it forwards to a peer, which
+        # checks it with a TokenReview against this ServiceAccount.
+        - name: peer-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: hangar-guest-bridge
+                  expirationSeconds: 3600
+                  path: token
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hangar-guest-bridge
+  namespace: hangar-system
+  labels:
+    app.kubernetes.io/name: hangar-guest-bridge
+    app.kubernetes.io/part-of: hangar
+spec:
+  selector:
+    app.kubernetes.io/name: hangar-guest-bridge
+  ports:
+    - name: https
+      port: 443
+      targetPort: https
+      protocol: TCP
+---
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1alpha1.subresources.hangar.magesgate.com
+  labels:
+    app.kubernetes.io/name: hangar-guest-bridge
+    app.kubernetes.io/part-of: hangar
+spec:
+  group: subresources.hangar.magesgate.com
+  version: v1alpha1
+  # As KubeVirt's subresources.kubevirt.io.
+  groupPriorityMinimum: 1000
+  versionPriority: 15
+  service:
+    namespace: hangar-system
+    name: hangar-guest-bridge
+    port: 443
+  # No caBundle and no insecureSkipTLSVerify: the bridge sets the caBundle
+  # to its own CA.

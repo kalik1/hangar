@@ -1,9 +1,10 @@
 name: CI
 
 # Every pull request and every push to main: lint, type check, unit tests,
-# build of the plugin, the cluster bundles, a build of the image for
-# amd64 and arm64 (not pushed), and the guest bridge's Go checks. The release
-# workflow runs the same checks before a release.
+# build of the plugin, the cluster bundles, builds of the plugin and guest
+# bridge images for amd64 and arm64 (not pushed), the guest bridge's Go
+# checks, and a smoke test of its bundle on kind. The release workflow runs
+# the same checks before a release.
 
 on:
   push:
@@ -119,8 +120,9 @@ jobs:
           persist-credentials: false
 
       # The files the release attaches for distributions (k4all): the
-      # runner's kubectl builds the node agent with kustomize.
-      - name: Build hangar-cluster.yaml and hangar-node-agent.yaml
+      # runner's kubectl builds the node agent and the guest bridge with
+      # kustomize.
+      - name: Build hangar-cluster.yaml, hangar-node-agent.yaml and hangar-guest-bridge.yaml
         run: .github/scripts/cluster-bundles.sh "${RUNNER_TEMP}/bundles"
 
   image:
@@ -148,3 +150,77 @@ jobs:
           provenance: false
           cache-from: type=gha,scope=image
           cache-to: type=gha,mode=max,scope=image
+
+  bridge-image:
+    name: Guest bridge image builds (amd64, arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The builder's Go is bridge/go.mod's toolchain
+        run: |
+          want="$(sed -n 's/^toolchain go//p' bridge/go.mod)"
+          have="$(sed -n 's/^ARG GO_VERSION=//p' Containerfile.bridge)"
+          if [ "${want}" != "${have}" ]; then
+            echo "::error::Containerfile.bridge builds with Go ${have}, bridge/go.mod wants ${want}"
+            exit 1
+          fi
+
+      # The builder cross-compiles on the runner's platform and the final
+      # stage only copies the binary: no emulation is needed.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Containerfile.bridge
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BRIDGE_VERSION=ci
+          push: false
+          provenance: false
+          cache-from: type=gha,scope=bridge-image
+          cache-to: type=gha,mode=max,scope=bridge-image
+
+  bridge-e2e:
+    name: Guest bridge bundle on kind
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the image (amd64, into Docker)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Containerfile.bridge
+          platforms: linux/amd64
+          build-args: |
+            BRIDGE_VERSION=e2e
+          push: false
+          load: true
+          provenance: false
+          tags: localhost/hangar-guest-bridge:e2e
+          cache-from: type=gha,scope=bridge-e2e
+          cache-to: type=gha,mode=max,scope=bridge-e2e
+
+      # Only kind itself: the script makes its own cluster.
+      - name: Install kind
+        uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
+        with:
+          version: v0.33.0
+          install_only: true
+
+      - name: Smoke test
+        run: .github/scripts/bridge-e2e.sh localhost/hangar-guest-bridge:e2e

@@ -215,6 +215,16 @@ func TestBridgeBehindTheAPIServer(t *testing.T) {
 		if err != nil || lease.Spec.HolderIdentity == nil || !strings.HasPrefix(*lease.Spec.HolderIdentity, "hangar-guest-bridge-") {
 			t.Fatalf("lease %v, %v", lease, err)
 		}
+		// What the bridge makes itself carries its name label.
+		secret, err := c.kube.CoreV1().Secrets(ns).Get(ctx, app.SecretName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for what, l := range map[string]map[string]string{"lease": lease.Labels, "secret": secret.Labels} {
+			if l["app.kubernetes.io/name"] != "hangar-guest-bridge" {
+				t.Errorf("the %s's labels are %v", what, l)
+			}
+		}
 	})
 
 	t.Run("a call that does not come from the API server is refused", func(t *testing.T) {
@@ -311,7 +321,7 @@ func (c *cluster) install(ctx context.Context, t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "hangar-guest-bridge"},
 		Rules: []rbacv1.PolicyRule{
 			{APIGroups: []string{"kubevirt.io"}, Resources: []string{"virtualmachineinstances"}, Verbs: []string{"get"}},
-			{APIGroups: []string{"apiregistration.k8s.io"}, Resources: []string{"apiservices"}, Verbs: []string{"patch"}, ResourceNames: []string{app.APIServiceName}},
+			{APIGroups: []string{"apiregistration.k8s.io"}, Resources: []string{"apiservices"}, Verbs: []string{"get", "patch"}, ResourceNames: []string{app.APIServiceName}},
 		},
 	}, metav1.CreateOptions{}))
 	for _, role := range []string{"hangar-guest-bridge", "system:auth-delegator"} {
