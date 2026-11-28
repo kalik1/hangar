@@ -6,7 +6,19 @@
 
 import React from 'react';
 import { setPolicies } from '../model/edit';
-import { A_MOVED_FROM, DiskMove, diskMoveStep, DiskMoveUntil, newDiskName, newDiskObject, newDiskSpec, swapDisks } from '../model/move';
+import {
+  A_MOVED_FROM,
+  DiskMove,
+  diskMoveStep,
+  DiskMoveUntil,
+  newDiskFromSpec,
+  newDiskName,
+  newDiskObject,
+  newDiskSpec,
+  revertDiskMove,
+  StuckDiskMove,
+  swapDisks,
+} from '../model/move';
 import { pinnedHost, podSum } from '../model/placement';
 import { Task, tasks, UntilWorld } from '../model/tasks';
 import { Obj, VM } from '../model/types';
@@ -65,6 +77,8 @@ export interface MoveDisksInput {
   moves: DiskMove[];
   /** Live (the VM runs and KubeVirt can copy while it runs) or powered off. */
   live: boolean;
+  /** Powered off, but it runs now: shut it down first, start it again once it uses the copies. */
+  restart?: boolean;
   /** Delete the old disks once the VM uses the new ones. */
   deleteOld: boolean;
   /** Names already used by claims and DataVolumes in the folder. */
@@ -79,7 +93,8 @@ export interface MoveDisksInput {
  * on after a reload. Live: blank disks, then the VM points at them with
  * updateVolumesStrategy Migration and KubeVirt copies while the guest runs.
  * Powered off: copies (CDI clones), and the VM is changed only when they
- * are complete.
+ * are complete. With `restart` the guest shuts down here, the copies are
+ * made once it is off, and the VM starts again on them.
  */
 export function moveDisks(i: MoveDisksInput) {
   const vm = i.vm;
@@ -92,9 +107,10 @@ export function moveDisks(i: MoveDisksInput) {
     return { move: { ...m, root: i.roots?.get(m.claim) ?? m.claim }, newName, spec: newDiskSpec(m, ns, i.live) };
   });
   const what = i.moves.length === 1 ? `disk ${i.moves[0].volume}` : `${i.moves.length} disks`;
+  const restart = !i.live && !!i.restart;
   return runTask(
     {
-      title: `Move ${what} to ${[...new Set(i.moves.map(m => m.datastore))].join(', ')}`,
+      title: `Move ${what} to ${[...new Set(i.moves.map(m => m.datastore))].join(', ')}${restart ? ', powered off' : ''}`,
       target: { kind: 'vm', namespace: ns, name },
       until: {
         type: 'diskMove',
@@ -102,16 +118,25 @@ export function moveDisks(i: MoveDisksInput) {
         name,
         live: i.live,
         deleteOld: i.deleteOld,
-        stage: 'copy',
-        moves: plan.map(p => ({ volume: p.move.volume, claim: p.move.claim, newName: p.newName, spec: p.spec })),
+        stage: restart ? 'stop' : 'copy',
+        ...(restart ? { restart: true } : {}),
+        moves: plan.map(p => ({ volume: p.move.volume, claim: p.move.claim, newName: p.newName, spec: p.spec, root: p.move.root })),
       },
       timeoutMs: 12 * 60 * 60 * 1000,
     },
     async () => {
-      for (const p of plan) await kpost(PATHS.dv(ns), newDiskObject(vm, p.move, p.newName, i.live));
+      // A clone of a disk in use waits for it: shut the guest down first, the copies come at the next stage.
+      if (restart) await kput(PATHS.vmSub(ns, name, 'stop'), {});
+      else for (const p of plan) await kpost(PATHS.dv(ns), newDiskObject(vm, p.move, p.newName, i.live));
     }
   );
 }
+
+const startVm = (ns: string, name: string) =>
+  kput(PATHS.vmSub(ns, name, 'start'), {}).catch((e: any) => {
+    // Already running (started by someone else meanwhile).
+    if (e?.status !== 409) throw e;
+  });
 
 const inFlight = new Set<string>();
 
@@ -125,6 +150,17 @@ export function advanceDiskMove(t: Task, w: UntilWorld) {
     return;
   }
   if (step.kind === 'failed') {
+    // Shut down for the move and still on its old disks: start it again.
+    if (u.restart && (u.stage === 'stop' || u.stage === 'copy')) {
+      inFlight.add(t.id);
+      startVm(u.namespace, u.name)
+        .then(
+          () => tasks.update(t.id, { status: 'failed', message: `${step.message}. The VM starts again on its old disks.` }),
+          e => tasks.update(t.id, { status: 'failed', message: `${step.message}. Starting the VM again failed: ${errorText(e)}` })
+        )
+        .finally(() => inFlight.delete(t.id));
+      return;
+    }
     tasks.update(t.id, { status: 'failed', message: step.message });
     return;
   }
@@ -134,6 +170,16 @@ export function advanceDiskMove(t: Task, w: UntilWorld) {
   }
   inFlight.add(t.id);
   const run = async () => {
+    if (step.kind === 'create') {
+      const latest = await kreq<VM>(PATHS.vm(u.namespace, u.name));
+      for (const m of u.moves)
+        await kpost(PATHS.dv(u.namespace), newDiskFromSpec(latest, m.root ?? m.claim, m.newName, m.spec)).catch((e: any) => {
+          // Made by an earlier pass (another Hangar page, or before a reload).
+          if (e?.status !== 409) throw e;
+        });
+      tasks.update(t.id, { until: { ...u, stage: 'copy' }, message: 'Copying the disk' });
+      return;
+    }
     if (step.kind === 'swap') {
       const latest = await kreq<VM>(PATHS.vm(u.namespace, u.name));
       const vols: any[] = latest.spec?.template?.spec?.volumes ?? [];
@@ -146,9 +192,10 @@ export function advanceDiskMove(t: Task, w: UntilWorld) {
         );
         await kreq(PATHS.vm(u.namespace, u.name), { method: 'PUT', body: { apiVersion: 'kubevirt.io/v1', kind: 'VirtualMachine', ...next, status: undefined } });
       }
+      if (u.restart) await startVm(u.namespace, u.name);
       if (u.live) tasks.update(t.id, { until: { ...u, stage: 'switch' }, message: 'Starting the copy', progress: undefined });
       else if (u.deleteOld) tasks.update(t.id, { until: { ...u, stage: 'cleanup' } });
-      else tasks.update(t.id, { status: 'done', message: 'The VM uses the new disks' });
+      else tasks.update(t.id, { status: 'done', message: u.restart ? 'The VM runs on the new disks' : 'The VM uses the new disks' });
       return;
     }
     // cleanup: the old disks, DataVolume first (else CDI recreates the claim).
@@ -164,6 +211,32 @@ export function advanceDiskMove(t: Task, w: UntilWorld) {
   run()
     .catch(e => tasks.update(t.id, { status: 'failed', message: errorText(e) }))
     .finally(() => inFlight.delete(t.id));
+}
+
+/**
+ * Puts the old disks back in a VM whose live disk move cannot end
+ * (stuckDiskMove): the VM names its old claims again, KubeVirt calls the
+ * volume change off, and its Pending migrations go. With `deleteNew`, the
+ * new disks, never written, go too.
+ */
+export function putOldDisksBack(vm: VM, stuck: StuckDiskMove, dvs: Map<string, Obj>, opts: { deleteNew: boolean }) {
+  const ns = vm.metadata.namespace as string;
+  const name = vm.metadata.name;
+  const gone = (e: any) => (e?.status === 404 ? undefined : Promise.reject(e));
+  return runTask(
+    { title: stuck.volumes.length === 1 ? 'Put the old disk back' : 'Put the old disks back', target: { kind: 'vm', namespace: ns, name } },
+    async () => {
+      const latest = await kreq<VM>(PATHS.vm(ns, name));
+      const next = revertDiskMove(latest, stuck, dvs);
+      await kreq(PATHS.vm(ns, name), { method: 'PUT', body: { apiVersion: 'kubevirt.io/v1', kind: 'VirtualMachine', ...next, status: undefined } });
+      for (const m of stuck.migrations) await kdelete(PATHS.migrations(ns, m)).catch(gone);
+      if (!opts.deleteNew) return;
+      for (const v of stuck.volumes) {
+        await kdelete(PATHS.dv(ns, v.newClaim)).catch(gone);
+        await kdelete(PATHS.pvc(ns, v.newClaim)).catch(gone);
+      }
+    }
+  );
 }
 
 /** The claims and DataVolumes in a folder (taken names) and the disks' first names. */

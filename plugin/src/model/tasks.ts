@@ -33,7 +33,8 @@ export type Until =
   /**
    * A disk move in stages, advanced by src/api/move.ts from the task
    * resolver (so it goes on after a reload, from any open Hangar page):
-   * copy (new DataVolumes ready) → switch (live: KubeVirt copies) → cleanup.
+   * [stop (a running VM shuts down, then the copies are made)] → copy (new
+   * DataVolumes ready) → switch (live: KubeVirt copies) → cleanup.
    */
   | {
       type: 'diskMove';
@@ -41,8 +42,11 @@ export type Until =
       name: string;
       live: boolean;
       deleteOld: boolean;
-      stage: 'copy' | 'switch' | 'cleanup';
-      moves: { volume: string; claim: string; newName: string; spec: any }[];
+      stage: 'stop' | 'copy' | 'switch' | 'cleanup';
+      /** Powered off for the move: Hangar shut it down, and starts it again once it uses the copies. */
+      restart?: boolean;
+      /** root: the disk's first name (moved-from), for copies made at the stop stage. */
+      moves: { volume: string; claim: string; newName: string; spec: any; root?: string }[];
     };
 
 export interface Task {

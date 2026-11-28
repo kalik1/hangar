@@ -275,6 +275,23 @@ describe('placement verdicts', () => {
     const b = p.hosts.find(h => h.host === 'b')!;
     expect(b.live.ok).toBe(false);
     expect(b.cold.reasons).toContain('Disk l is stored on a');
+    // A live disk move copies the disk: b can take the VM for that, the AMD host still cannot.
+    expect(b.liveDiskMove).toEqual({ ok: true, reasons: [] });
+    expect(p.hosts.find(h => h.host === 'c')!.liveDiskMove.reasons.join()).toMatch(/CPU maker/);
+    expect(p.hosts.find(h => h.host === 'a')!.liveDiskMove.ok).toBe(false);
+  });
+
+  it('a single host can take no live disk move', () => {
+    const lpvs = new Map([['pv-l', pv('pv-l', 'kubernetes.io/hostname', 'a')]]);
+    const lpvcs = new Map([['demo/l', claim('l', ['ReadWriteOnce'], 'pv-l')]]);
+    const lv = vm('local', {}, [{ name: 'rootdisk', persistentVolumeClaim: { claimName: 'l' } }]);
+    const p = placement({ vm: lv, vmi: vmi('local', 'a', { status: 'False', reason: 'DisksNotLiveMigratable' }), nodes: [intelA], launchers: [], pvcs: lpvcs, pvs: lpvs });
+    expect(p.hosts.filter(h => h.liveDiskMove.ok)).toEqual([]);
+  });
+
+  it('other refusals of KubeVirt hold for a live disk move too', () => {
+    const p = placement({ vm: v, vmi: vmi('ceph', 'a', { status: 'False', reason: 'HostDeviceNotLiveMigratable' }), nodes, launchers: [], pvcs, pvs });
+    expect(p.hosts.find(h => h.host === 'b')!.liveDiskMove.ok).toBe(false);
   });
 
   it('maintenance, memory and pins are reasons', () => {

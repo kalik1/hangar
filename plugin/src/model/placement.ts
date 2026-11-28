@@ -372,6 +372,12 @@ export interface HostVerdict {
   current: boolean;
   live: Check;
   cold: Check;
+  /**
+   * It can take the VM for a live disk move (storage migration): KubeVirt
+   * copies the disks during a migration to another host, so the live
+   * checks hold here, except where the disks are stored.
+   */
+  liveDiskMove: Check;
   memFree: number;
   /** Device resource → free/total on this host. */
   devices: { resource: string; free: number; total: number; need: number }[];
@@ -485,30 +491,37 @@ export function placement(i: PlacementInput): Placement {
     const coldReasons = current ? ['It runs here now'] : [...base, ...coldRules, ...diskShort, ...devShort, ...(memShort ? [memShort] : [])];
 
     const liveReasons: string[] = [];
+    const diskMoveReasons: string[] = [];
     if (current) liveReasons.push('It runs here now');
     else if (!running) liveReasons.push('The VM is not running');
     else {
-      liveReasons.push(...base);
-      if (pin && pin !== host) liveReasons.push(`It is pinned to ${pin}`);
-      if (!nodeMatchesSelector(node, liveSpec.nodeSelector)) liveReasons.push('Its placement rules (node selector) exclude this host');
+      const rules: string[] = [...base];
+      if (pin && pin !== host) rules.push(`It is pinned to ${pin}`);
+      if (!nodeMatchesSelector(node, liveSpec.nodeSelector)) rules.push('Its placement rules (node selector) exclude this host');
       else if (!nodeMatchesTerms(node, liveSpec.affinity?.nodeAffinity?.requiredDuringSchedulingIgnoredDuringExecution?.nodeSelectorTerms))
-        liveReasons.push('Its placement rules (affinity) exclude this host');
+        rules.push('Its placement rules (affinity) exclude this host');
       const lt = untoleratedTaint(node, liveSpec.tolerations);
-      if (lt) liveReasons.push(`Reserved: taint ${lt.key}`);
+      if (lt) rules.push(`Reserved: taint ${lt.key}`);
       if (cpu) {
         const c = cpuCompatible(cpu, node);
-        if (!c.ok && c.why) liveReasons.push(c.why);
+        if (!c.ok && c.why) rules.push(c.why);
       }
-      liveReasons.push(...diskShort);
+      liveReasons.push(...rules, ...diskShort);
       if (memShort) liveReasons.push(memShort);
       if (!live.ok && live.why) liveReasons.push(live.why);
+      // A disk move copies the disks: where they are stored now does not keep it here.
+      diskMoveReasons.push(...rules);
+      if (memShort) diskMoveReasons.push(memShort);
+      if (!live.ok && live.why && live.reason !== 'DisksNotLiveMigratable') diskMoveReasons.push(live.why);
     }
+    if (current || !running) diskMoveReasons.push(...liveReasons);
     return {
       host,
       node,
       current,
       live: { ok: liveReasons.length === 0, reasons: liveReasons },
       cold: { ok: coldReasons.length === 0, reasons: coldReasons },
+      liveDiskMove: { ok: diskMoveReasons.length === 0, reasons: diskMoveReasons },
       memFree,
       devices,
     };
