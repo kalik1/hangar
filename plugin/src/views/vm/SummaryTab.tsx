@@ -1,5 +1,5 @@
 /*
- * VM summary: guest, hardware, placement and policies, usage, notes, tags,
+ * VM summary: guest (GuestSummary), hardware, placement and policies, usage, notes, tags,
  * where the VM is reachable (its published ports), the VM's recent tasks;
  * on k4all, its metadata service.
  */
@@ -12,7 +12,6 @@ import React from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import * as A from '../../api/actions';
 import { useHangar, useTasks } from '../../api/data';
-import { useGuestInfo } from '../../api/guest';
 import { last, useMetrics } from '../../api/metrics';
 import { liveGate } from '../../model/placement';
 import { isProtected } from '../../model/protection';
@@ -22,7 +21,6 @@ import {
   disks,
   EVICTION_LABELS,
   evictionStrategy,
-  guestAgent,
   hardware,
   isTemplate,
   key,
@@ -39,8 +37,8 @@ import { TaskRows } from '../../shell/TasksDock';
 import { K8sName, KV, Meter, Panel, Sparkline, Tag } from '../../ui/kit';
 import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
-import { vmOs } from '../os';
 import { useVmDeviceRows } from './DevicesSection';
+import { GuestSummary } from './GuestSummary';
 import { MetadataPanel } from './MetadataPanel';
 import { ReachableCard } from './ReachableCard';
 
@@ -104,9 +102,6 @@ export function SummaryTab({ vm }: { vm: Obj }) {
   const allTasks = useTasks();
   const vmi = d.idx.vmi.get(key(vm));
   const hw = hardware(vm, vmi, d.instancetypes);
-  const os = vmOs(vm, d);
-  const agent = guestAgent(vmi);
-  const info = useGuestInfo(vm.metadata.namespace as string, vm.metadata.name, agent);
   const ds = disks(vm);
   const ns = nics(vm, vmi);
   const hostDevs = useVmDeviceRows(vm);
@@ -126,33 +121,7 @@ export function SummaryTab({ vm }: { vm: Obj }) {
   return (
     <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0,1.25fr) minmax(0,1fr)' }, gap: 2, alignItems: 'start' }}>
       <Box sx={{ display: 'grid', gap: 2 }}>
-        {!tpl && (
-          <Panel title="Guest" icon="mdi:monitor">
-            <KV
-              rows={[
-                ['Operating system', os.name + (os.fromAgent ? '' : ' (from the settings)')],
-                ['Guest agent', agent ? 'Running' : vmi ? 'Not running: install qemu-guest-agent for IPs, users and filesystems' : '—'],
-                ['Hostname', info?.os?.hostname ?? vmi?.status?.guestOSInfo?.hostname ?? '—'],
-                ['Kernel', os.kernel ?? '—'],
-                ['IP addresses', ns.flatMap(n => n.ips).join(', ') || '—'],
-                ['Logged-in users', info ? (info.users.length ? info.users.map(u => u.userName).join(', ') : 'Nobody') : '—'],
-              ]}
-            />
-            {info && info.filesystems.length > 0 && (
-              <Box sx={{ mt: 2, display: 'grid', gap: 1.25 }}>
-                {info.filesystems.map(f => (
-                  <Meter
-                    key={`${f.diskName}-${f.mountPoint}`}
-                    label={`${f.mountPoint} (${f.fileSystemType})`}
-                    used={f.usedBytes}
-                    total={f.totalBytes}
-                    format={n => formatBytes(n)}
-                  />
-                ))}
-              </Box>
-            )}
-          </Panel>
-        )}
+        {!tpl && <GuestSummary vm={vm} />}
         <Panel title="Hardware" icon="mdi:chip" actions={<Button size="small" component={RouterLink} to={hrefFor('vm', vm.metadata.namespace, vm.metadata.name, 'configure')} sx={{ textTransform: 'none' }}>Edit</Button>}>
           <KV
             rows={[
