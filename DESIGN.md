@@ -98,7 +98,9 @@ history keeps growing, the tasks keep being followed.
     with a one-click change to VirtIO (at the next restart) for users who
     may patch the VM. noVNC keeps the extension private
     (`console/desktopSize.ts` is the one place that reaches into it), so
-    its own `resizeSession` stays off.
+    its own `resizeSession` stays off. The wizard gives desktop guests
+    (Windows; an image or installer named Workstation, Desktop, KDE…) the
+    VirtIO card where the `VideoConfig` gate is on.
   - Clipboard sharing (Configure → Clipboard sharing, or the wizard's last
     step): a KubeVirt hook sidecar (feature gate `Sidecar`, KubeVirt's
     sidecar-shim image, a script in the ConfigMap `hangar-clipboard-hook`

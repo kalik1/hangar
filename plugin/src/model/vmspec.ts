@@ -231,6 +231,8 @@ export interface WizardInput {
   headless?: boolean;
   /** Sound card model. */
   sound?: 'ich9' | 'ac97';
+  /** The video card (KubeVirt's VideoConfig gate); undefined: KubeVirt's default. */
+  video?: 'virtio';
   /** NAT network inside the pod for pod-network adapters (vmNetworkCIDR); undefined: KubeVirt's 10.0.2.0/24. */
   vmNetworkCidr?: string;
   /** Ask for k4all's metadata service (model/metadata.ts); serviceAccount: whose tokens the guest gets. */
@@ -392,6 +394,7 @@ export function buildVm(w: WizardInput): VM {
       rng: {},
       ...(w.tpm ? { tpm: { persistent: true } } : {}),
       ...(w.sound ? { sound: { name: 'sound', model: w.sound } } : {}),
+      ...(w.video && !w.headless ? { video: { type: w.video } } : {}),
     },
   };
   if (!w.instancetype) {
