@@ -10,6 +10,11 @@ name: Release
 #    .github/scripts/cluster-bundles.sh);
 # 4. the Artifact Hub metadata committed to main under
 #    artifacthub/hangar-headlamp-plugin/<version>/.
+#
+# A tag with a pre-release suffix (v<version>-rc.1, any tag with a "-") is a
+# release candidate: the same image and assets, a GitHub pre-release that
+# never becomes "Latest", no Artifact Hub metadata on main, and README.md and
+# distribution/ may keep the pins of the last release.
 
 on:
   push:
@@ -32,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -56,13 +62,21 @@ jobs:
             echo "::error::${GITHUB_REF_NAME} does not match plugin/package.json (${PACKAGE})"
             exit 1
           fi
-          # Every pinned image reference in the docs and distribution files.
-          OTHER="$(grep -rhoE "${IMAGE_NAME#ghcr.io/*/}:[0-9][0-9A-Za-z.-]*" README.md distribution | sort -u | grep -v ":${VERSION}\$" || true)"
-          if [ -n "${OTHER}" ]; then
-            echo "::error::README.md or distribution/ pin another version: ${OTHER}"
-            exit 1
+          # A release candidate: main keeps the pins of the last release.
+          if [[ "${VERSION}" == *-* ]]; then
+            PRERELEASE=true
+            echo "::notice::${GITHUB_REF_NAME} is a pre-release: the pins in README.md and distribution/ are not checked"
+          else
+            PRERELEASE=false
+            # Every pinned image reference in the docs and distribution files.
+            OTHER="$(grep -rhoE "${IMAGE_NAME#ghcr.io/*/}:[0-9][0-9A-Za-z.-]*" README.md distribution | sort -u | grep -v ":${VERSION}\$" || true)"
+            if [ -n "${OTHER}" ]; then
+              echo "::error::README.md or distribution/ pin another version: ${OTHER}"
+              exit 1
+            fi
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
 
   ci:
     name: CI
@@ -132,6 +146,7 @@ jobs:
       contents: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      PRERELEASE: ${{ needs.version.outputs.prerelease }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -168,16 +183,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A release candidate never becomes the latest release.
+          KIND=()
+          if [ "${PRERELEASE}" = true ]; then
+            KIND=(--prerelease --latest=false)
+          fi
           gh release create "${GITHUB_REF_NAME}" \
             "plugin/${PACKAGE_NAME}-${VERSION}.tar.gz" \
             "plugin/${PACKAGE_NAME}-${VERSION}.tar.gz.sha256" \
             "artifacthub/${PACKAGE_NAME}/${VERSION}/artifacthub-pkg.yml" \
             "${RUNNER_TEMP}/bundles/hangar-cluster.yaml" \
             "${RUNNER_TEMP}/bundles/hangar-node-agent.yaml" \
+            "${KIND[@]}" \
             --verify-tag --generate-notes --title "Hangar ${VERSION}" \
             --notes "Image: \`${IMAGE_NAME}:${VERSION}\` (linux/amd64, linux/arm64)."
 
+      # Artifact Hub lists released versions only.
       - name: Commit the Artifact Hub metadata to main
+        if: needs.version.outputs.prerelease != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
