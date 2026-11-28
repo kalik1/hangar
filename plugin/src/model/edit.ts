@@ -100,14 +100,80 @@ export function addBlankDisk(
   return { vm: out, name };
 }
 
-/** Attaches an existing disk (PVC) of the same folder. */
-export function attachDisk(vm: VM, claimName: string, bus: string, hotplug = false): { vm: VM; name: string } {
-  const out = hotplug ? forHotplug(vm) : clone(vm);
+/* ------------------------------------------------------------ boot order */
+
+/** On a VM: the claim of the boot disk taken out of it, so attaching it again makes it boot first. */
+export const A_FORMER_BOOT_DISK = 'hangar.magesgate.com/former-boot-disk';
+
+/** Some disk or network adapter has a boot order. */
+export function hasBootOrder(vm: VM): boolean {
+  const dev = vm.spec?.template?.spec?.domain?.devices ?? {};
+  return [...(dev.disks ?? []), ...(dev.interfaces ?? [])].some((x: any) => x.bootOrder !== undefined);
+}
+
+export function isEfi(vm: VM): boolean {
+  return !!vm.spec?.template?.spec?.domain?.firmware?.bootloader?.efi;
+}
+
+/** The boot disk taken out of the VM, if attaching `claim` would bring it back. */
+export function isFormerBootDisk(vm: VM, claim: string): boolean {
+  return vm.metadata.annotations?.[A_FORMER_BOOT_DISK] === claim;
+}
+
+/** The claim of the first disk in boot order, when it has one. */
+function bootClaim(vm: VM): string | undefined {
+  const t = vm.spec?.template?.spec ?? {};
+  const first = ((t.domain?.devices?.disks ?? []) as any[])
+    .filter(d => d.bootOrder !== undefined && !d.cdrom)
+    .sort((a, b) => a.bootOrder - b.bootOrder)[0];
+  const v = first && ((t.volumes ?? []) as any[]).find(x => x.name === first.name);
+  return v?.dataVolume?.name ?? v?.persistentVolumeClaim?.claimName;
+}
+
+function setAnnotation(vm: VM, k: string, v: string | undefined) {
+  const a = { ...(vm.metadata.annotations ?? {}) };
+  if (v === undefined) delete a[k];
+  else a[k] = v;
+  if (Object.keys(a).length) vm.metadata.annotations = a;
+  else delete vm.metadata.annotations;
+}
+
+/**
+ * Why saving `after` may leave a UEFI VM that does not boot: no device has
+ * a boot order, and the edit took the last one away or changed the disks.
+ * OVMF then tries the devices in bus order, the cloud-init disk among them,
+ * and can stop there.
+ */
+export function bootOrderWarning(before: VM, after: VM): string | undefined {
+  if (!isEfi(after) || hasBootOrder(after)) return undefined;
+  const names = (v: VM) => ((v.spec?.template?.spec?.domain?.devices?.disks ?? []) as any[]).map(d => d.name).join();
+  if (!hasBootOrder(before) && names(before) === names(after)) return undefined;
+  return 'No disk or network adapter of the VM has a boot order. With UEFI the firmware may try another disk first, such as the cloud-init disk, and not start the guest: choose a boot disk in Boot order.';
+}
+
+/** The boot order after every device's, 1 when none has one. */
+function nextBootOrder(vm: VM): number {
+  const dev = vm.spec?.template?.spec?.domain?.devices ?? {};
+  const orders = [...(dev.disks ?? []), ...(dev.interfaces ?? [])].map((x: any) => x.bootOrder).filter((n: any) => typeof n === 'number');
+  return orders.length ? Math.max(...orders) + 1 : 1;
+}
+
+/**
+ * Attaches an existing disk (PVC) of the same folder. The VM's former boot
+ * disk gets its boot order back: 1 when no other device has one, else after
+ * them. It is then attached for the next power-on, not hot-plugged: a
+ * hot-plugged disk joins after the firmware has looked for one.
+ */
+export function attachDisk(vm: VM, claimName: string, bus: string, hotplug = false): { vm: VM; name: string; bootOrder?: number } {
+  const bootOrder = isFormerBootDisk(vm, claimName) ? nextBootOrder(vm) : undefined;
+  const live = hotplug && bootOrder === undefined;
+  const out = live ? forHotplug(vm) : clone(vm);
   const t = tpl(out);
   const name = uniqueName(deviceNames(vm), claimName.replace(/^.*?-/, '').slice(0, 30) || 'disk');
-  t.domain.devices.disks = [...(t.domain.devices.disks ?? []), { name, disk: { bus } }];
-  t.volumes = [...(t.volumes ?? []), { name, persistentVolumeClaim: { claimName, ...(hotplug ? { hotpluggable: true } : {}) } }];
-  return { vm: out, name };
+  t.domain.devices.disks = [...(t.domain.devices.disks ?? []), { name, disk: { bus }, ...(bootOrder !== undefined ? { bootOrder } : {}) }];
+  t.volumes = [...(t.volumes ?? []), { name, persistentVolumeClaim: { claimName, ...(live ? { hotpluggable: true } : {}) } }];
+  if (bootOrder !== undefined) setAnnotation(out, A_FORMER_BOOT_DISK, undefined);
+  return { vm: out, name, bootOrder };
 }
 
 /**
@@ -196,35 +262,41 @@ export function ejectCdrom(vm: VM, name: string, keepDrive: boolean): { vm: VM; 
  * Removes a disk from the VM. The dataVolumeTemplate goes too when the VM
  * created it, so the disk is deleted with it unless `keep` (then the PVC
  * stays, unattached). Returns the claim to delete separately, if asked.
+ * The boot disk is remembered on the VM (A_FORMER_BOOT_DISK): attached
+ * again, it boots first again.
  */
 export function removeDisk(vm: VM, name: string): { vm: VM; claim?: string; owned: boolean } {
   const out = clone(vm);
   const t = tpl(out);
   const vol = (t.volumes ?? []).find((v: any) => v.name === name);
   const claim = vol?.dataVolume?.name ?? vol?.persistentVolumeClaim?.claimName;
+  const wasBoot = !!claim && bootClaim(vm) === claim;
   t.domain.devices.disks = (t.domain.devices.disks ?? []).filter((d: any) => d.name !== name);
   t.volumes = (t.volumes ?? []).filter((v: any) => v.name !== name);
   const owned = !!claim && (out.spec.dataVolumeTemplates ?? []).some((d: any) => d.metadata?.name === claim);
   if (owned) out.spec.dataVolumeTemplates = out.spec.dataVolumeTemplates.filter((d: any) => d.metadata?.name !== claim);
+  if (wasBoot) setAnnotation(out, A_FORMER_BOOT_DISK, claim);
   return { vm: out, claim, owned };
 }
 
-/** Boot order from an ordered list of device names (disks and NICs); others lose it. */
-export function setBootOrder(vm: VM, order: string[]): VM {
+/**
+ * Boot order from an ordered list of device names (disks and NICs). The
+ * devices that had a boot order and are not in the list lose it: they are
+ * returned in `dropped`, for the caller to say so.
+ */
+export function setBootOrder(vm: VM, order: string[]): { vm: VM; dropped: string[] } {
   const out = clone(vm);
   const t = tpl(out);
-  const pos = (n: string) => order.indexOf(n);
-  for (const d of t.domain.devices.disks ?? []) {
-    const i = pos(d.name);
+  const dropped: string[] = [];
+  for (const d of [...(t.domain.devices.disks ?? []), ...(t.domain.devices.interfaces ?? [])]) {
+    const i = order.indexOf(d.name);
     if (i >= 0) d.bootOrder = i + 1;
-    else delete d.bootOrder;
+    else if (d.bootOrder !== undefined) {
+      dropped.push(d.name);
+      delete d.bootOrder;
+    }
   }
-  for (const n of t.domain.devices.interfaces ?? []) {
-    const i = pos(n.name);
-    if (i >= 0) n.bootOrder = i + 1;
-    else delete n.bootOrder;
-  }
-  return out;
+  return { vm: out, dropped };
 }
 
 export function addNic(vm: VM, network: string, model: string): { vm: VM; name: string } {

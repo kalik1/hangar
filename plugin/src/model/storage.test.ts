@@ -116,6 +116,16 @@ describe('disk classification', () => {
     expect(inv.rows[0]).toMatchObject({ kind: 'vm' });
     expect(inv.rows[0].uses[0].device).toBe('state');
   });
+  it('never offers a VM state claim as a disk', () => {
+    const state = pvc('p', 'persistent-state-for-web-abcde', { labels: { 'persistent-state-for': 'web' }, ownerReferences: [{ kind: 'VirtualMachine', name: 'web' }] });
+    expect(classifyDisk(state, undefined, [], 'lib')).toBe('internal');
+    // Attached by mistake by Hangar 0.1.x: still KubeVirt's.
+    expect(classifyDisk(state, undefined, [{ vm: vm('p', 'web', []), slot: 'state-for-web-abcde', device: 'disk' }], 'lib')).toBe('internal');
+    // Its VM is gone (or KubeVirt replaced the claim): hidden, not unattached.
+    const inv = diskInventory([state], [], [vm('p', 'other', [])], new Map(), 'lib');
+    expect(inv.rows).toEqual([]);
+    expect(inv.hidden).toBe(1);
+  });
 });
 
 describe('disk state', () => {

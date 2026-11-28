@@ -32,6 +32,7 @@ import { hostState } from '../../model/inventory';
 import { preferredDatastore } from '../../model/placement';
 import { freeVmCidr, podNetIssues, setVmNetworkCidr, vmNetworkCidrOf } from '../../model/podnet';
 import { isProtected } from '../../model/protection';
+import { classifyDisk } from '../../model/storage';
 import { Obj } from '../../model/types';
 import { formatBytes, GiB, parseQuantity } from '../../model/units';
 import { disks, EVICTION_LABELS, hardware, isTemplate, key, liveMigratable, nics, powerState, RUN_STRATEGIES, runStrategy, tags } from '../../model/vm';
@@ -305,7 +306,9 @@ function AddDiskDialog({ vm, d, onClose, libraryNs, preset }: { vm: Obj; d: Hang
       !used.has(`${ns}/${p.metadata.name}`) &&
       !p.metadata.name.startsWith('prime-') &&
       !p.metadata.name.endsWith('-scratch') &&
-      p.metadata.labels?.['hangar.magesgate.com/image'] !== 'true'
+      p.metadata.labels?.['hangar.magesgate.com/image'] !== 'true' &&
+      // CDI's internals and KubeVirt's VM state (TPM, UEFI) are not disks.
+      classifyDisk(p, d.idx.dv.get(key(p)), undefined, libraryNs) !== 'internal'
   );
   const isos = libraryImages(d.dvs, d.pvcs, libraryNs).filter(i => i.media === 'iso' && i.ready);
   const vmi = d.idx.vmi.get(key(vm));
@@ -325,9 +328,13 @@ function AddDiskDialog({ vm, d, onClose, libraryNs, preset }: { vm: Obj; d: Hang
   const busLive = !live || E.HOTPLUG_BUSES.includes(bus);
   const ok = kind === 'new' ? Number(size) >= 1 && busLive : kind === 'existing' ? !!claim && busLive : kind === 'iso' ? !!iso : hot.on !== false;
   const isoLive = live && !!drive;
+  const bootBack = !!claim && E.isFormerBootDisk(vm, claim);
   const save = () => {
     if (kind === 'new') quiet(saveVm(vm, live ? 'Add disk (hot-plug)' : 'Add disk', E.addBlankDisk(vm, { sizeBytes: Number(size) * GiB, storageClass: sc, bus, hotplug: live }).vm));
-    else if (kind === 'existing') quiet(saveVm(vm, live ? 'Attach disk (hot-plug)' : 'Attach disk', E.attachDisk(vm, claim, bus, live).vm));
+    else if (kind === 'existing') {
+      const r = E.attachDisk(vm, claim, bus, live);
+      quiet(saveVm(vm, live && r.bootOrder === undefined ? 'Attach disk (hot-plug)' : 'Attach disk', r.vm));
+    }
     else if (kind === 'drive') quiet(saveVm(vm, 'Add CD/DVD drive', E.addCdromDrive(vm).vm));
     else {
       const i = isos.find(x => `${x.namespace}/${x.name}` === iso)!;
@@ -382,9 +389,13 @@ function AddDiskDialog({ vm, d, onClose, libraryNs, preset }: { vm: Obj; d: Hang
             {free.map(p => (
               <MenuItem key={p.metadata.name} value={p.metadata.name}>
                 {p.metadata.name} · {formatBytes(parseQuantity(p.status?.capacity?.storage ?? p.spec?.resources?.requests?.storage))}
+                {E.isFormerBootDisk(vm, p.metadata.name) ? ' · its boot disk' : ''}
               </MenuItem>
             ))}
           </TextField>
+        )}
+        {kind === 'existing' && bootBack && (
+          <Help>It was this VM&apos;s boot disk: it gets its boot order back{running ? ', and is not hot-plugged, so that the VM can start from it' : ''}.</Help>
         )}
         {kind === 'iso' && (
           <>
@@ -423,7 +434,7 @@ function AddDiskDialog({ vm, d, onClose, libraryNs, preset }: { vm: Obj; d: Hang
                 SATA{live ? ' (not while running)' : ''}
               </MenuItem>
             </TextField>
-            {when(live)}
+            {when(live && !(kind === 'existing' && bootBack))}
           </>
         )}
         {running && hot.on === false && kind !== 'drive' && <GateHint gate={HOTPLUG_DECLARATIVE}>Adding disks to a running VM needs KubeVirt&apos;s {HOTPLUG_DECLARATIVE} feature, off in this datacenter.</GateHint>}
@@ -526,8 +537,34 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
   ]
     .sort((a, b) => a[1] - b[1])
     .map(x => x[0]);
-  const [order, setOrder] = React.useState<string[]>(currentOrder);
-  const orderChanged = order.join() !== currentOrder.join();
+  // An edit holds while the VM's own order is the one it started from: when the VM changes (a disk comes back with its boot order), it starts over.
+  const currentKey = currentOrder.join();
+  const [orderEdit, setOrderEdit] = React.useState<{ from: string; order: string[] } | null>(null);
+  const order = orderEdit && orderEdit.from === currentKey ? orderEdit.order : currentOrder;
+  const setOrder = (next: string[] | ((o: string[]) => string[])) => setOrderEdit({ from: currentKey, order: typeof next === 'function' ? next(order) : next });
+  const orderChanged = order.join() !== currentKey;
+  const saveOrder = async () => {
+    const r = E.setBootOrder(vm, order);
+    const warn = E.bootOrderWarning(vm, r.vm);
+    if (r.dropped.length || warn) {
+      const ok = await confirm({
+        title: `Change the boot order of ${vm.metadata.name}?`,
+        body: (
+          <>
+            {r.dropped.length > 0 && (
+              <p>
+                No longer in the boot order: <b>{r.dropped.join(', ')}</b>.
+              </p>
+            )}
+            {warn && <p>{warn}</p>}
+          </>
+        ),
+        confirm: 'Save',
+      });
+      if (!ok) return;
+    }
+    quiet(A.updateVm(vm, 'Change boot order', r.vm));
+  };
 
   /* policies */
   const spec = vm.spec?.template?.spec ?? {};
@@ -557,12 +594,15 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
   const removeDisk = async (name: string, claim?: string) => {
     const hp = E.isHotpluggable(vm, name);
     const r = hp || !running ? { ...E.removeDisk(E.forHotplug(vm), name) } : E.removeDisk(vm, name);
+    const bootWarn = E.bootOrderWarning(vm, r.vm);
     const ok = await confirm({
       title: `Remove ${name} from ${vm.metadata.name}?`,
       body: (
         <>
           <p>{claim ? 'The disk is detached from the VM.' : 'The device is removed.'}</p>
           {running && <p>{hp && hotOn ? 'The running VM loses it at once (hot-unplug).' : 'The running VM keeps it until the next restart.'}</p>}
+          {claim && E.isFormerBootDisk(r.vm, claim) && <p>It is the VM&apos;s boot disk. Attached again, it boots first again.</p>}
+          {bootWarn && <p>{bootWarn}</p>}
           {claim && prot && <p>The VM is protected from deletion: the disk stays in the folder, still protected. Remove its protection in Storage → Disks to delete it.</p>}
         </>
       ),
@@ -572,7 +612,7 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
     });
     if (!ok) return;
     try {
-      await saveVm(vm, hp && running ? 'Remove disk (hot-unplug)' : 'Remove disk', r.vm);
+      await saveVm(vm, hp && running ? 'Remove disk (hot-unplug)' : 'Remove disk', r.vm, { bootWarned: true });
     } catch {
       return;
     }
@@ -868,10 +908,10 @@ export function ConfigureTab({ vm }: { vm: Obj }) {
           actions={
             orderChanged ? (
               <>
-                <Button size="small" color="inherit" onClick={() => setOrder(currentOrder)} sx={{ textTransform: 'none' }}>
+                <Button size="small" color="inherit" onClick={() => setOrderEdit(null)} sx={{ textTransform: 'none' }}>
                   Undo
                 </Button>
-                <Button size="small" variant="contained" disableElevation onClick={() => quiet(A.updateVm(vm, 'Change boot order', E.setBootOrder(vm, order)))} sx={{ textTransform: 'none' }}>
+                <Button size="small" variant="contained" disableElevation onClick={saveOrder} sx={{ textTransform: 'none' }}>
                   Save
                 </Button>
               </>

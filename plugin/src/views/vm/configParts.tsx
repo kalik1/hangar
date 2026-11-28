@@ -10,8 +10,10 @@ import Tooltip from '@mui/material/Tooltip';
 import React from 'react';
 import * as A from '../../api/actions';
 import { labelDisks } from '../../api/protection';
+import { bootOrderWarning } from '../../model/edit';
 import { isProtected, protectedClaims, withVmProtection } from '../../model/protection';
 import { VM } from '../../model/types';
+import { confirm } from '../../ui/dialogs';
 import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
 
@@ -68,8 +70,18 @@ export function Help({ children, tone }: { children: React.ReactNode; tone?: 'wa
   return <Box sx={{ fontSize: 12.5, color: tone === 'warn' ? '#B7791F' : t.muted, mt: 0.5, lineHeight: 1.5 }}>{children}</Box>;
 }
 
-/** Saves an edited VM; disks added to a protected VM get the protection label too. */
-export async function saveVm(vm: VM, title: string, next: VM): Promise<void> {
+/**
+ * Saves an edited VM; disks added to a protected VM get the protection
+ * label too. An edit that leaves a UEFI VM with no boot order asks first,
+ * unless the caller has said so already (`bootWarned`); cancelled, it
+ * rejects and nothing is saved.
+ */
+export async function saveVm(vm: VM, title: string, next: VM, opts: { bootWarned?: boolean } = {}): Promise<void> {
+  const warn = opts.bootWarned ? undefined : bootOrderWarning(vm, next);
+  if (warn) {
+    const ok = await confirm({ title: `Save ${vm.metadata.name} without a boot order?`, body: <p>{warn}</p>, confirm: 'Save anyway' });
+    if (!ok) throw new Error('Cancelled');
+  }
   if (!isProtected(vm)) {
     await A.updateVm(vm, title, next);
     return;
