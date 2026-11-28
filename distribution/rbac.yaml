@@ -4,7 +4,10 @@
 #   hangar-viewer       sees VMs, hosts, datastores, networks, the library, events,
 #                       ServiceAccounts (the wizard's pick for k4all's metadata service)
 #   hangar-vm-operator  + power operations, consoles, migrations, snapshots
-#   hangar-vm-admin     + creates, edits, clones and deletes VMs, disks, images
+#   hangar-vm-admin     + creates, edits, clones and deletes VMs, disks, images;
+#                       creates the Secret of a VM whose cloud-init user data is
+#                       longer than KubeVirt takes inline (create only: no role
+#                       here reads, lists or changes Secrets)
 #
 # They complement KubeVirt's and CDI's own aggregated roles
 # (kubevirt.io:view/edit/admin, cdi.kubevirt.io:view/edit/admin).
@@ -123,6 +126,11 @@ rules:
   - apiGroups: ['']
     resources: [persistentvolumeclaims]
     verbs: [create, update, patch, delete]
+  # cloud-init user data over 2,048 bytes: a Secret owned by the VM (set when
+  # it is created, so no patch), deleted with it by the garbage collector.
+  - apiGroups: ['']
+    resources: [secrets]
+    verbs: [create]
   - apiGroups: [k8s.cni.cncf.io]
     resources: [network-attachment-definitions]
     verbs: [create, update, patch, delete]

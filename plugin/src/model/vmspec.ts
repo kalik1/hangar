@@ -10,7 +10,7 @@ import { withMetadata } from './metadata';
 import { withVmProtection } from './protection';
 import { Obj, VM } from './types';
 import { GiB, parseQuantity, toQuantity } from './units';
-import { L_TEMPLATE } from './vm';
+import { L_TEMPLATE, lacksGuestAgent, loginShell } from './vm';
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 
@@ -208,6 +208,11 @@ export interface WizardInput {
   nics: WizardNic[];
   /** DNS of the pod network adapter; undefined = cluster defaults. */
   dns?: DnsSettings;
+  /**
+   * cloud-init: the user Hangar adds (the wizard's default is DEFAULT_USER;
+   * none: the image's default user gets the password and keys), or custom
+   * user data that replaces everything.
+   */
   cloudInit?: { user?: string; password?: string; sshKeys?: string[]; hostname?: string; custom?: string };
   runStrategy: string;
   evictionStrategy?: string;
@@ -230,20 +235,55 @@ export interface WizardInput {
   metadata?: { serviceAccount?: string };
 }
 
-export function cloudInitUserData(c: NonNullable<WizardInput['cloudInit']>, hostname: string): string {
+/** The user the New VM wizard fills in. */
+export const DEFAULT_USER = 'k4all';
+
+const USER_NAME = /^[a-z_][a-z0-9_-]{0,31}$/;
+
+/** A Linux user name cloud-init can create. Returns the problem, or null. */
+export function userNameProblem(name: string): string | null {
+  return !name || USER_NAME.test(name) ? null : 'Use lowercase letters, digits, - and _ (at most 32), starting with a letter or _.';
+}
+
+/**
+ * The #cloud-config of a wizard VM. A user is a `users:` entry (cloud-init
+ * deprecates `user:`) with what an image's default user has: sudo without
+ * a password, bash where the OS has it; its password and SSH keys. Without
+ * a user the image's default user gets them. Ubuntu and Debian install the
+ * QEMU guest agent (`packages`); every OS enables it (`runcmd`). Custom
+ * user data is returned unchanged.
+ */
+export function cloudInitUserData(c: NonNullable<WizardInput['cloudInit']>, hostname: string, osId?: string): string {
   if (c.custom && c.custom.trim()) return c.custom;
   const lines = ['#cloud-config', `hostname: ${c.hostname || hostname}`];
-  if (c.user) lines.push(`user: ${c.user}`);
-  if (c.password) {
-    lines.push(`password: ${JSON.stringify(c.password)}`);
-    lines.push('chpasswd: { expire: false }');
-    lines.push('ssh_pwauth: true');
-  }
   const keys = (c.sshKeys ?? []).map(k => k.trim()).filter(Boolean);
-  if (keys.length) {
-    lines.push('ssh_authorized_keys:');
-    for (const k of keys) lines.push(`  - ${JSON.stringify(k)}`);
+  if (c.user) {
+    const shell = loginShell(osId);
+    lines.push('users:');
+    lines.push(`  - name: ${USER_NAME.test(c.user) ? c.user : JSON.stringify(c.user)}`);
+    lines.push('    sudo: "ALL=(ALL) NOPASSWD:ALL"');
+    if (shell) lines.push(`    shell: ${shell}`);
+    if (c.password) {
+      lines.push('    lock_passwd: false');
+      lines.push(`    plain_text_passwd: ${JSON.stringify(c.password)}`);
+    }
+    if (keys.length) {
+      lines.push('    ssh_authorized_keys:');
+      for (const k of keys) lines.push(`      - ${JSON.stringify(k)}`);
+    }
+    if (c.password) lines.push('ssh_pwauth: true');
+  } else {
+    if (c.password) {
+      lines.push(`password: ${JSON.stringify(c.password)}`);
+      lines.push('chpasswd: { expire: false }');
+      lines.push('ssh_pwauth: true');
+    }
+    if (keys.length) {
+      lines.push('ssh_authorized_keys:');
+      for (const k of keys) lines.push(`  - ${JSON.stringify(k)}`);
+    }
   }
+  if (lacksGuestAgent(osId)) lines.push('packages: [qemu-guest-agent]');
   lines.push('runcmd:');
   lines.push('  - [sh, -c, "systemctl enable --now qemu-guest-agent || rc-update add qemu-guest-agent default || true"]');
   return lines.join('\n') + '\n';
@@ -295,7 +335,7 @@ export function buildVm(w: WizardInput): VM {
   });
   if (w.cloudInit && !iso) {
     disks.push({ name: 'cloudinitdisk', disk: { bus: 'virtio' } });
-    volumes.push({ name: 'cloudinitdisk', cloudInitNoCloud: { userData: cloudInitUserData(w.cloudInit, w.name) } });
+    volumes.push({ name: 'cloudinitdisk', cloudInitNoCloud: { userData: cloudInitUserData(w.cloudInit, w.name, w.osId) } });
   }
   const interfaces: any[] = [];
   const networks: any[] = [];
@@ -380,4 +420,131 @@ export function minRootBytes(source: BootSource, imagePvc?: Obj): number {
     if (isFinite(cap)) return Math.ceil(cap / GiB) * GiB;
   }
   return GiB;
+}
+
+/* ------------------------------------------- cloud-init over KubeVirt's limit */
+
+/** KubeVirt refuses inline cloud-init user data longer than this (the VMI admitter's cloudInitUserMaxLen, v1.9.1). */
+export const CLOUD_INIT_INLINE_MAX = 2048;
+
+/** The Secret label that names the VM whose user data it holds. */
+export const L_CLOUD_INIT_OF = 'hangar.magesgate.com/cloud-init-of';
+
+/** Bytes of a string in UTF-8, as KubeVirt counts them. */
+export const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
+
+export interface CloudInitOverflow {
+  /** The cloud-init volume. */
+  volume: string;
+  /** Its user data, as a Secret holds it: `stringData` (userData) or `data` (userDataBase64). */
+  data: { stringData: { userdata: string } } | { data: { userdata: string } };
+  bytes: number;
+  /** Copied from the source VM's Secret (copiedCloudInit), whatever its size. */
+  copied?: boolean;
+}
+
+/** The VM's cloud-init volumes whose inline user data KubeVirt would refuse (over CLOUD_INIT_INLINE_MAX bytes). */
+export function cloudInitOverflow(vm: VM): CloudInitOverflow[] {
+  const out: CloudInitOverflow[] = [];
+  for (const v of vm.spec?.template?.spec?.volumes ?? []) {
+    const ci = v.cloudInitNoCloud ?? v.cloudInitConfigDrive;
+    if (!ci) continue;
+    if (typeof ci.userData === 'string') {
+      const bytes = utf8Bytes(ci.userData);
+      if (bytes > CLOUD_INIT_INLINE_MAX) out.push({ volume: v.name, data: { stringData: { userdata: ci.userData } }, bytes });
+    } else if (typeof ci.userDataBase64 === 'string') {
+      let bytes = 0;
+      try {
+        bytes = atob(ci.userDataBase64).length;
+      } catch {
+        continue; // KubeVirt refuses it anyway, with its own reason
+      }
+      if (bytes > CLOUD_INIT_INLINE_MAX) out.push({ volume: v.name, data: { data: { userdata: ci.userDataBase64 } }, bytes });
+    }
+  }
+  return out;
+}
+
+/**
+ * The user data a copy of a VM takes from the source's Secrets (volume →
+ * text, read by the caller), with the copy's hostname. It goes into a
+ * Secret of the copy's own, whatever its size: never inline, where anyone
+ * who may read the VM would see it, and not the source's, which is deleted
+ * with the source and may be in another folder.
+ */
+export function copiedCloudInit(vm: VM, texts: Map<string, string>): CloudInitOverflow[] {
+  const out: CloudInitOverflow[] = [];
+  for (const v of vm.spec?.template?.spec?.volumes ?? []) {
+    const text = texts.get(v.name);
+    if (text === undefined || !(v.cloudInitNoCloud ?? v.cloudInitConfigDrive)?.secretRef) continue;
+    const userdata = withHostname(text, vm.metadata.name) ?? text;
+    out.push({ volume: v.name, data: { stringData: { userdata } }, bytes: utf8Bytes(userdata), copied: true });
+  }
+  return out;
+}
+
+const SUFFIX = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+/** A name for the Secret of a VM's user data: <vm>-cloudinit-<5 random characters>, chosen before the VM exists (it refers to it). */
+export function cloudInitSecretName(vmName: string, bytes: (n: number) => Uint8Array = randomBytes): string {
+  return `${vmName}-cloudinit-${Array.from(bytes(5), b => SUFFIX[b % SUFFIX.length]).join('')}`;
+}
+
+/**
+ * The Secret that holds a VM's user data instead (KubeVirt reads its key
+ * `userdata`). With the VM's UID it is owned by the VM, from its creation:
+ * the garbage collector deletes it with the VM, and no patch is needed.
+ */
+export function cloudInitSecret(vm: VM, o: CloudInitOverflow, name: string, uid?: string): Obj {
+  return {
+    apiVersion: 'v1',
+    kind: 'Secret',
+    metadata: {
+      name,
+      namespace: vm.metadata.namespace,
+      labels: { [L_CLOUD_INIT_OF]: vm.metadata.name, 'app.kubernetes.io/managed-by': 'hangar' },
+      ...(uid ? { ownerReferences: [{ apiVersion: 'kubevirt.io/v1', kind: 'VirtualMachine', name: vm.metadata.name, uid }] } : {}),
+    },
+    type: 'Opaque',
+    ...o.data,
+  };
+}
+
+/** The VM with the user data of `volume` read from the Secret `secret` (secretRef) instead of inline. */
+export function withCloudInitSecret(vm: VM, volume: string, secret: string): VM {
+  const out = clone(vm);
+  const v = (out.spec?.template?.spec?.volumes ?? []).find((x: any) => x.name === volume);
+  const ci = v?.cloudInitNoCloud ?? v?.cloudInitConfigDrive;
+  if (ci) {
+    delete ci.userData;
+    delete ci.userDataBase64;
+    ci.secretRef = { name: secret };
+  }
+  return out;
+}
+
+/** The VM's cloud-init volumes that read their user data from a Secret. */
+export function cloudInitSecretRefs(vm: VM): { volume: string; secret: string }[] {
+  const out: { volume: string; secret: string }[] = [];
+  for (const v of vm.spec?.template?.spec?.volumes ?? []) {
+    const secret = (v.cloudInitNoCloud ?? v.cloudInitConfigDrive)?.secretRef?.name;
+    if (secret) out.push({ volume: v.name, secret });
+  }
+  return out;
+}
+
+/** The VM without these volumes and their disks. */
+export function withoutVolumes(vm: VM, names: string[]): VM {
+  const out = clone(vm);
+  const t = out.spec?.template?.spec;
+  if (!t) return out;
+  t.volumes = (t.volumes ?? []).filter((v: any) => !names.includes(v.name));
+  if (t.domain?.devices?.disks) t.domain.devices.disks = t.domain.devices.disks.filter((d: any) => !names.includes(d.name));
+  return out;
+}
+
+/** Why a VM is not created: its user data needs a Secret and the Secret could not be made. */
+export function cloudInitRefusal(o: CloudInitOverflow, reason: string): string {
+  if (o.copied) return `The source keeps its cloud-init user data in a Secret, and Hangar could not make one for the copy: ${reason}`;
+  return `The cloud-init user data is ${o.bytes.toLocaleString('en-US')} bytes, more than the ${CLOUD_INIT_INLINE_MAX.toLocaleString('en-US')} KubeVirt takes inline, and Hangar could not keep it in a Secret: ${reason}`;
 }

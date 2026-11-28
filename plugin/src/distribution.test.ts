@@ -16,6 +16,7 @@ const DIST = path.resolve('..', 'distribution');
 interface K8sObject {
   kind: string;
   metadata: { name: string; namespace?: string };
+  rules?: { apiGroups?: string[]; resources?: string[]; verbs?: string[] }[];
 }
 
 function objects(file: string): K8sObject[] {
@@ -52,5 +53,16 @@ describe('cluster bundles', () => {
   it('no object is in both bundles', () => {
     const agent = new Set(nodeAgentObjects().map(key));
     expect(cluster.map(key).filter(k => agent.has(k))).toEqual([]);
+  });
+});
+
+describe('roles and Secrets', () => {
+  it('only hangar-vm-admin may create Secrets (cloud-init user data); no role reads, lists, watches or changes them', () => {
+    const grants = [...objects('rbac.yaml'), ...nodeAgentObjects()].flatMap(o =>
+      (o.rules ?? [])
+        .filter(r => (r.apiGroups ?? []).includes('') && (r.resources ?? []).some(x => x === 'secrets' || x === '*'))
+        .map(r => `${o.metadata.name}: ${(r.verbs ?? []).join(',')}`)
+    );
+    expect(grants).toEqual(['hangar-vm-admin-rules: create']);
   });
 });

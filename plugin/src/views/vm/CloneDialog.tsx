@@ -2,6 +2,13 @@
  * Copies of a VM: clone a VM, clone it to a template, or make a new VM from
  * a template. Every disk is copied (CDI clone), the copy gets new MAC
  * addresses and, when it uses cloud-init, its own hostname.
+ *
+ * User data the source keeps in a Secret goes into a Secret of the copy's
+ * own (api/cloudInit.ts) when the user may read the source's: no Hangar
+ * role gives that. Without it the dialog says what the copy gets: in the
+ * same folder it refers to the source's Secret, in another folder (where
+ * that Secret does not exist, and the copy could not start) it gets no
+ * cloud-init user data.
  */
 
 import Autocomplete from '@mui/material/Autocomplete';
@@ -17,12 +24,14 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import React from 'react';
 import * as A from '../../api/actions';
+import { readCloudInitSecrets } from '../../api/cloudInit';
 import { HangarData } from '../../api/data';
+import { useCan } from '../../api/permissions';
 import { folders } from '../../model/inventory';
 import { Obj } from '../../model/types';
 import { formatBytes, parseQuantity } from '../../model/units';
 import { claimNames, displayName } from '../../model/vm';
-import { copyVm, nameProblem } from '../../model/vmspec';
+import { cloudInitSecretRefs, copyVm, nameProblem, withoutVolumes } from '../../model/vmspec';
 import { useSettings } from '../../shell/settings';
 import { useTokens } from '../../ui/useTokens';
 
@@ -66,8 +75,19 @@ export function CloneDialog({
   const title =
     mode === 'clone' ? `Clone ${displayName(source)}` : mode === 'template' ? `Clone ${displayName(source)} to a template` : `New VM from ${displayName(source)}`;
   const action = mode === 'clone' ? 'Clone' : mode === 'template' ? 'Create template' : 'Create VM';
-  const submit = () => {
-    const vm = copyVm(source, {
+  const refs = cloudInitSecretRefs(source);
+  const canRead = useCan(refs.length ? { verb: 'get', group: '', resource: 'secrets', namespace: srcNs } : null);
+  const secretNote =
+    refs.length && !canRead
+      ? ns === srcNs
+        ? `${displayName(source)} keeps its cloud-init user data in a Secret, which your role may not read. The copy uses the same Secret: it keeps ${displayName(source)}'s hostname, and loses its user data if ${displayName(source)} is deleted.`
+        : `${displayName(source)} keeps its cloud-init user data in a Secret, which your role may not read, and that Secret is not in ${ns}: the copy gets no cloud-init user data.`
+      : null;
+  const submit = async () => {
+    onClose();
+    // User data kept in the source's Secret: the copy gets a Secret of its own when the user may read it.
+    const copied = refs.length && canRead ? await readCloudInitSecrets(source) : { texts: new Map<string, string>(), unreadable: refs.map(r => r.volume) };
+    let vm = copyVm(source, {
       name,
       namespace: ns,
       runStrategy: start ? 'Always' : 'Halted',
@@ -75,10 +95,11 @@ export function CloneDialog({
       asTemplate: mode === 'template',
       description: desc || undefined,
     });
-    A.createVm(vm, mode === 'deploy' ? 'Deploy from template' : mode === 'template' ? 'Clone to template' : 'Clone VM').catch(
+    // In another folder the source's Secret does not exist: a reference to it would keep the copy from starting.
+    if (ns !== srcNs && copied.unreadable.length) vm = withoutVolumes(vm, copied.unreadable);
+    A.createVm(vm, mode === 'deploy' ? 'Deploy from template' : mode === 'template' ? 'Clone to template' : 'Clone VM', copied.texts).catch(
       () => undefined
     );
-    onClose();
   };
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth aria-labelledby="hangar-clone-title">
@@ -122,6 +143,11 @@ export function CloneDialog({
               ? 'The source has no persistent disks: only its settings are copied.'
               : `${claims.length} disk${claims.length > 1 ? 's' : ''}, ${formatBytes(total)} in all, will be copied. Network adapters get new MAC addresses.`}
           </Typography>
+          {secretNote && (
+            <Typography role="status" sx={{ fontSize: 13, color: '#B7791F' }}>
+              {secretNote}
+            </Typography>
+          )}
         </Box>
       </DialogContent>
       <DialogActions>
