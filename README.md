@@ -286,6 +286,11 @@ configuration; plain `vitest run` lacks it).
    plugins*, URL `https://github.com/kalik1/hangar/artifacthub`).
    To claim the listing, set the repository ID from artifacthub.io in
    `artifacthub/artifacthub-repo.yml`.
+3. A release candidate is a tag with a suffix, `v<x.y.z>-rc.<n>`: only
+   `plugin/package.json` takes that version, and README.md and
+   `distribution/` keep the pins of the last release. The workflow
+   publishes the same image and assets as a GitHub pre-release, which never
+   becomes the latest release, and commits nothing to `artifacthub/`.
 
 Design notes: [DESIGN.md](https://github.com/kalik1/hangar/blob/main/DESIGN.md).
 
