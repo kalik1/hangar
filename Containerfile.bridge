@@ -1,0 +1,43 @@
+# Hangar guest bridge image: ghcr.io/kalik1/hangar-guest-bridge:<version>
+#
+# The aggregated API server of bridge/ (cmd/hangar-guest-bridge), run by the
+# DaemonSet of distribution/guest-bridge. One static binary on distroless
+# static (root variant: the bridge runs as root with only DAC_OVERRIDE, to
+# reach the launchers' libvirt sockets).
+#
+# Build context: the repository root.
+#   podman build -f Containerfile.bridge --build-arg BRIDGE_VERSION=0.2.0 \
+#     -t ghcr.io/kalik1/hangar-guest-bridge:0.2.0 .
+#
+# The builder runs on the build platform and cross-compiles (CGO_ENABLED=0)
+# for the target one; the final stage only copies the binary, so a
+# multi-platform build needs no emulation.
+
+# GO_VERSION is the toolchain line of bridge/go.mod (CI checks it).
+ARG GO_VERSION=1.26.11
+ARG GO_IMAGE=docker.io/library/golang:${GO_VERSION}-alpine
+# gcr.io/distroless/static-debian12:latest (root), pinned by digest.
+ARG BASE_IMAGE=gcr.io/distroless/static-debian12@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
+
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
+ARG TARGETOS
+ARG TARGETARCH
+ARG BRIDGE_VERSION=dev
+WORKDIR /src
+COPY bridge/go.mod bridge/go.sum ./
+RUN go mod download
+COPY bridge/ ./
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags "-s -w -X main.version=${BRIDGE_VERSION}" \
+      -o /out/hangar-guest-bridge ./cmd/hangar-guest-bridge
+
+FROM ${BASE_IMAGE}
+ARG BRIDGE_VERSION=dev
+LABEL org.opencontainers.image.title="Hangar guest bridge" \
+      org.opencontainers.image.description="Aggregated API that gives KubeVirt VMs' guest agents to the users RBAC allows (subresources.hangar.magesgate.com)" \
+      org.opencontainers.image.source="https://github.com/kalik1/hangar" \
+      org.opencontainers.image.licenses="GPL-3.0-only" \
+      org.opencontainers.image.version="${BRIDGE_VERSION}"
+COPY --from=build /out/hangar-guest-bridge /hangar-guest-bridge
+USER 0:0
+ENTRYPOINT ["/hangar-guest-bridge"]

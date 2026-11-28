@@ -1,0 +1,8 @@
+# The guest bridge (hangar-guest-bridge.yaml of each release, built by
+# .github/scripts/cluster-bundles.sh). No `namespace:` here: one RoleBinding
+# lives in kube-system, so every object names its own.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - guest-bridge.yaml
+  - rbac.yaml

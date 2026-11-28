@@ -592,6 +592,8 @@ plugin/
                              inventory, capacity, alarms, ...
   src/ui/                    tokens, LED, kit (panels, meters, …), DataTable, dialogs
 distribution/node-agent/     the host agent: DaemonSet, agent.sh (bind, inventory), render.awk (JSON)
+distribution/guest-bridge/   the guest bridge's DaemonSet, Service, APIService and RBAC
+bridge/                      the guest bridge (Go): an aggregated API server for the guest agent
 distribution/protection-policy.yaml   the delete protection ValidatingAdmissionPolicy
 ```
 

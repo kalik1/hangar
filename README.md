@@ -47,6 +47,7 @@ names, related objects, YAML).
 | Multus | Bridged and VLAN networks |
 | VolumeSnapshot CRDs, a snapshot controller and KubeVirt's `Snapshot` feature gate | Snapshots |
 | Hangar's node agent (below), IOMMU on the hosts | Host devices (PCI, GPU, USB passthrough, host disks) |
+| Hangar's guest bridge (below), the QEMU guest agent in the guest | The guest agent's full report and the files inside a VM |
 | KubeVirt's `Sidecar` feature gate, spice-vdagent in the guest | Clipboard sharing with the console (below) |
 | KubeVirt's `DeclarativeHotplugVolumes` feature gate (not with `HotplugVolumes`) | Disks and CD/DVD media in and out of a running VM |
 | KubeVirt's `ExpandDisks`, `VideoConfig`, `PanicDevices`, `VSOCK`, `DownwardMetrics`, `EnableVirtioFsStorageVolumes`/`EnableVirtioFsConfigVolumes` feature gates | A running guest sees a disk grow; video card choice (VirtIO: the desktop resizes with the console window); crash reports; VSOCK; host metrics; shared folders |
@@ -121,7 +122,9 @@ with a ClusterRoleBinding), and `hangar-hardware-admin` for host devices.
 Controls a user's role does not allow are disabled with the reason.
 `hangar-vm-admin` may create Secrets, only to keep a VM's cloud-init user
 data when it is longer than KubeVirt takes inline (2,048 bytes); no role
-reads, lists or changes Secrets.
+reads, lists or changes Secrets. With the guest bridge (below),
+`hangar-viewer` also reads what a VM's guest agent reports, and
+`hangar-guest-admin` gives the files inside VMs.
 
 ```bash
 kubectl apply -f distribution/rbac.yaml
@@ -160,6 +163,56 @@ delete the mappings, then `kubectl delete -k distribution/node-agent` and
 `kubectl -n hangar-system delete configmap hangar-passthrough`. A host that
 still has `/etc/udev/rules.d/60-hangar-vfio.rules` binds those devices to
 vfio-pci at boot until the file is removed.
+
+### Guest agent (guest bridge)
+
+KubeVirt shows a little of what a VM's QEMU guest agent knows (OS, users,
+filesystems). Hangar's guest bridge gives the rest, and the files inside
+the VM, to the users RBAC allows: a DaemonSet in `hangar-system` (image
+`ghcr.io/kalik1/hangar-guest-bridge:<version>`, amd64 and arm64) that
+serves an aggregated API, `subresources.hangar.magesgate.com/v1alpha1`,
+with two subresources of KubeVirt's `virtualmachineinstances`:
+
+| Subresource | Verbs | Role |
+|---|---|---|
+| `guestinfo` | get | `hangar-viewer` (and the roles that include it) |
+| `guestfiles` | get, create, update, delete | `hangar-guest-admin` |
+
+The API server checks the user's RBAC on the subresource, as for KubeVirt's
+own (`virtualmachineinstances/vnc`); the bridge builds every guest command
+itself, and runs no command a user sends. `hangar-guest-admin` works in the
+guest with the guest agent's rights (root on most guests): it is not part
+of `hangar-vm-admin`, so bind it on its own, per folder with a RoleBinding,
+or for some VMs with a Role of your own that names them in
+`resourceNames`.
+
+```bash
+kubectl apply -k distribution/guest-bridge
+```
+
+Each pod reaches the VMs of its host through their launcher pods' libvirt
+sockets, under the kubelet's `/var/lib/kubelet/pods` (read-only): it runs as
+root with only the `DAC_OVERRIDE` capability, as `spc_t` under SELinux, not
+privileged (the namespace's Pod Security level is `privileged`, as the node
+agent needs too). A call for a VM on another host goes to the bridge pod of
+that host. The bridge makes its own CA and serving certificate (the Secret
+`hangar-guest-bridge-tls`) and sets the APIService's `caBundle`; it needs no
+cert-manager. Each pod requests 10m CPU and 64 MiB of memory (limit
+128 MiB).
+
+Undo, the APIService first (an APIService without its server leaves the
+cluster's API discovery incomplete), then the rest but the namespace, which
+the node agent shares, then what the bridge made itself:
+
+```bash
+kubectl delete apiservice v1alpha1.subresources.hangar.magesgate.com
+kubectl delete -k distribution/guest-bridge -l app.kubernetes.io/name=hangar-guest-bridge
+kubectl -n hangar-system delete secret hangar-guest-bridge-tls
+kubectl -n hangar-system delete lease hangar-guest-bridge
+```
+
+`kubectl delete namespace hangar-system` afterwards only when the node agent
+is gone too.
 
 ### The image library
 
@@ -279,13 +332,20 @@ install them next to the plugin image:
   (`distribution/rbac.yaml` and `distribution/protection-policy.yaml`);
 - `hangar-node-agent.yaml`: the node agent (`distribution/node-agent`,
   built with kustomize), privileged, in its own file so a distribution can
-  leave it out.
+  leave it out;
+- `hangar-guest-bridge.yaml`: the guest bridge (`distribution/guest-bridge`,
+  built with kustomize), with the bridge image of the same release, in its
+  own file too.
+
+The two in `hangar-system` share their Namespace object, and only it:
+removing one must keep the namespace while the other is installed.
 
 ### On k4all
 
 [k4all](https://github.com/gpillon/k4all) v2.7.0 and later install Hangar
 with virtualization on: the plugin in Headlamp, the roles, the delete
-protection and the node agent, from this repository's releases. Nothing to
+protection and the node agent, from this repository's releases; v2.7.2 and
+later the guest bridge too. Nothing to
 do; a ClusterConfig override from the file below can stay (k4all keeps its
 own pin of the plugins it ships) or go.
 
@@ -313,7 +373,15 @@ npm run package                                            # the release tarball
 # the image, from the repository root
 podman build -f Containerfile --build-arg PLUGIN_VERSION=0.1.1 \
   -t ghcr.io/kalik1/hangar-headlamp-plugin:0.1.1 .
+
+# the guest bridge (Go, bridge/go.mod's toolchain)
+cd bridge && go vet ./... && go test ./... && cd ..
+podman build -f Containerfile.bridge --build-arg BRIDGE_VERSION=0.2.0 \
+  -t ghcr.io/kalik1/hangar-guest-bridge:0.2.0 .
 ```
+
+`.github/scripts/bridge-e2e.sh <image>` runs the bridge's bundle on a
+two-node kind cluster, as CI does (without KubeVirt: a stub of its VMI CRD).
 
 `npm test` runs `headlamp-plugin test` (vitest with the plugin's own
 configuration; plain `vitest run` lacks it).
@@ -322,23 +390,27 @@ configuration; plain `vitest run` lacks it).
 
 1. Set the version in `plugin/package.json` (`npm version <x.y.z>
    --no-git-tag-version` in `plugin/`), in the image tags of `distribution/`
-   and in this README; merge to main.
+   (the plugin's and the guest bridge's) and in this README; merge to main.
 2. Tag main `v<x.y.z>` and push the tag. The
    [release workflow](https://github.com/kalik1/hangar/blob/main/.github/workflows/release.yaml) checks that the tag
-   matches the files, runs CI, pushes the image for amd64 and arm64,
-   publishes a GitHub Release with the tarball, its sha256, its
-   `artifacthub-pkg.yml` and the cluster objects (`hangar-cluster.yaml`,
-   `hangar-node-agent.yaml`), and commits that metadata to
+   matches the files, runs CI, pushes the plugin and guest bridge images
+   for amd64 and arm64, publishes a GitHub Release with the tarball, its
+   sha256, its `artifacthub-pkg.yml` and the cluster objects
+   (`hangar-cluster.yaml`, `hangar-node-agent.yaml`,
+   `hangar-guest-bridge.yaml`), and commits that metadata to
    `artifacthub/hangar-headlamp-plugin/<x.y.z>/` on main for
    [Artifact Hub](https://artifacthub.io) (repository kind *Headlamp
    plugins*, URL `https://github.com/kalik1/hangar/artifacthub`).
    To claim the listing, set the repository ID from artifacthub.io in
-   `artifacthub/artifacthub-repo.yml`.
+   `artifacthub/artifacthub-repo.yml`. A new image's GHCR package
+   (`hangar-guest-bridge` with 0.2.0) is private until its owner makes it
+   public in the package settings.
 3. A release candidate is a tag with a suffix, `v<x.y.z>-rc.<n>`: only
    `plugin/package.json` takes that version, and README.md and
    `distribution/` keep the pins of the last release. The workflow
-   publishes the same image and assets as a GitHub pre-release, which never
-   becomes the latest release, and commits nothing to `artifacthub/`.
+   publishes the same images and assets as a GitHub pre-release, which never
+   becomes the latest release, and commits nothing to `artifacthub/`; its
+   `hangar-guest-bridge.yaml` runs the candidate's bridge image.
 
 Design notes: [DESIGN.md](https://github.com/kalik1/hangar/blob/main/DESIGN.md).
 

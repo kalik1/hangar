@@ -1,0 +1,125 @@
+# The guest bridge's own access (its ServiceAccount hangar-guest-bridge).
+# The users' roles for its API are in ../rbac.yaml: hangar-viewer
+# (guestinfo) and hangar-guest-admin (guestfiles).
+#
+# Cluster-wide: read the VMIs (the node of each call), record Events on
+# them, keep the caBundle of its one APIService, and check the callers
+# (system:auth-delegator: TokenReviews of forwarded calls,
+# SubjectAccessReviews of every call).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hangar-guest-bridge
+  labels:
+    app.kubernetes.io/name: hangar-guest-bridge
+    app.kubernetes.io/part-of: hangar
+rules:
+  - apiGroups: [kubevirt.io]
+    resources: [virtualmachineinstances]
+    verbs: [get, list, watch]
+  - apiGroups: ['', events.k8s.io]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [apiregistration.k8s.io]
+    resources: [apiservices]
+    resourceNames: [v1alpha1.subresources.hangar.magesgate.com]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hangar-guest-bridge
+  labels:
+    app.kubernetes.io/name: hangar-guest-bridge
+    app.kubernetes.io/part-of: hangar
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hangar-guest-bridge
+subjects:
+  - kind: ServiceAccount
+    name: hangar-guest-bridge
+    namespace: hangar-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hangar-guest-bridge:auth-delegator
+  labels:
+    app.kubernetes.io/name: hangar-guest-bridge
+    app.kubernetes.io/part-of: hangar
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: hangar-guest-bridge
+    namespace: hangar-system
+---
+# In its namespace: its peers' addresses (pods), its certificates (the
+# Secret hangar-guest-bridge-tls, which the first pod creates) and the Lease
+# whose holder renews them. No other Secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hangar-guest-bridge
+  namespace: hangar-system
+  labels:
+    app.kubernetes.io/name: hangar-guest-bridge
+    app.kubernetes.io/part-of: hangar
+rules:
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: ['']
+    resources: [secrets]
+    verbs: [create]
+  - apiGroups: ['']
+    resources: [secrets]
+    resourceNames: [hangar-guest-bridge-tls]
+    verbs: [get, update]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [hangar-guest-bridge]
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hangar-guest-bridge
+  namespace: hangar-system
+  labels:
+    app.kubernetes.io/name: hangar-guest-bridge
+    app.kubernetes.io/part-of: hangar
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: hangar-guest-bridge
+subjects:
+  - kind: ServiceAccount
+    name: hangar-guest-bridge
+    namespace: hangar-system
+---
+# The API server's front-proxy CA and header names
+# (kube-system/extension-apiserver-authentication): how the bridge knows a
+# call comes from the API server.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hangar-guest-bridge:extension-apiserver-authentication-reader
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: hangar-guest-bridge
+    app.kubernetes.io/part-of: hangar
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: extension-apiserver-authentication-reader
+subjects:
+  - kind: ServiceAccount
+    name: hangar-guest-bridge
+    namespace: hangar-system
