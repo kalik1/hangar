@@ -1,7 +1,7 @@
 // Package guestinfo serves the guestinfo subresource: what a VM's guest agent
 // reports, from a fixed list of read-only agent commands.
 //
-//	GET .../virtualmachineinstances/{name}/guestinfo?sections=system,cpu,...
+//	GET .../virtualmachineinstances/{name}/guestinfo?sections=system,cpu,...&sshUsers=k4all
 //
 // The call reads guest-info first. A command it lists as disabled is
 // reported Blocked and never called; one it does not list is NotSupported.
@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,6 +38,22 @@ const DefaultBudget = 30 * time.Second
 // MaxSSHUsers bounds the users whose authorized keys one call reads.
 const MaxSSHUsers = 16
 
+// MaxRequestedSSHUsers bounds the users a call names in "sshUsers".
+const MaxRequestedSSHUsers = 4
+
+// sshUserName is a user name a call may name in "sshUsers": a portable
+// Linux user name, as useradd takes it by default.
+var sshUserName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+
+// Request is what one guestinfo call asks for.
+type Request struct {
+	// Sections are the sections to read, in the answer's order.
+	Sections []string
+	// SSHUsers are users whose authorized keys the sshkeys section reads
+	// too, logged in or not: for example the VM's cloud-init user.
+	SSHUsers []string
+}
+
 // VMSource gives the agent of a VMI on this node: agent.Pool.
 type VMSource interface {
 	VM(ctx context.Context, t guest.Target) (*agent.VM, error)
@@ -56,7 +73,13 @@ var _ guest.Handler = (*Handler)(nil)
 
 // ServeGuest implements guest.Handler.
 func (h *Handler) ServeGuest(w http.ResponseWriter, r *http.Request, call guest.Call) {
-	sections, err := ParseSections(r.URL.Query()["sections"])
+	q := r.URL.Query()
+	sections, err := ParseSections(q["sections"])
+	if err != nil {
+		guest.WriteError(w, apierrors.NewBadRequest(err.Error()))
+		return
+	}
+	sshUsers, err := ParseSSHUsers(q["sshUsers"])
 	if err != nil {
 		guest.WriteError(w, apierrors.NewBadRequest(err.Error()))
 		return
@@ -73,7 +96,7 @@ func (h *Handler) ServeGuest(w http.ResponseWriter, r *http.Request, call guest.
 		guest.WriteError(w, agent.StatusError(err))
 		return
 	}
-	info, err := Read(ctx, vm, sections, h.Clock)
+	info, err := Read(ctx, vm, Request{Sections: sections, SSHUsers: sshUsers}, h.Clock)
 	if err != nil {
 		if errors.Is(err, context.Canceled) && r.Context().Err() != nil {
 			return // the caller went away
@@ -112,16 +135,42 @@ func ParseSections(values []string) ([]string, error) {
 	return out, nil
 }
 
-// Read reads the sections from the VM's agent.
+// ParseSSHUsers reads the "sshUsers" parameter: user names separated by
+// commas (spaces around them are dropped), in one or more values, at most
+// MaxRequestedSSHUsers, each a portable Linux user name. Repeats count once.
+func ParseSSHUsers(values []string) ([]string, error) {
+	var out []string
+	for _, v := range values {
+		for _, u := range strings.Split(v, ",") {
+			u = strings.Trim(u, " ")
+			switch {
+			case u == "":
+				continue
+			case !sshUserName.MatchString(u):
+				return nil, fmt.Errorf("sshUsers: %q is not a user name (%s)", u, sshUserName)
+			case slices.Contains(out, u):
+				continue
+			}
+			out = append(out, u)
+		}
+	}
+	if len(out) > MaxRequestedSSHUsers {
+		return nil, fmt.Errorf("sshUsers names %d users; the limit is %d", len(out), MaxRequestedSSHUsers)
+	}
+	return out, nil
+}
+
+// Read reads the request's sections from the VM's agent.
 //
 // Its error ends the call before an answer: ErrConnectionLost, ErrNoDomain
 // or a canceled context. Everything the agent says, its failures included,
 // is in the GuestInfo.
-func Read(ctx context.Context, vm *agent.VM, sections []string, c clock.PassiveClock) (*v1alpha1.GuestInfo, error) {
+func Read(ctx context.Context, vm *agent.VM, req Request, c clock.PassiveClock) (*v1alpha1.GuestInfo, error) {
 	if c == nil {
 		c = clock.RealClock{}
 	}
-	rd := &reader{ctx: ctx, vm: vm, clock: c, info: &v1alpha1.GuestInfo{
+	sections := req.Sections
+	rd := &reader{ctx: ctx, vm: vm, clock: c, sshUsers: req.SSHUsers, info: &v1alpha1.GuestInfo{
 		TypeMeta: metav1.TypeMeta{Kind: "GuestInfo", APIVersion: v1alpha1.SchemeGroupVersion.String()},
 		ReadAt:   metav1.NewTime(c.Now()),
 	}}
@@ -143,6 +192,8 @@ type reader struct {
 	vm    *agent.VM
 	clock clock.PassiveClock
 	info  *v1alpha1.GuestInfo
+	// sshUsers are the users the call named for the sshkeys section.
+	sshUsers []string
 
 	// commands are guest-info's commands and whether each is enabled; nil
 	// when guest-info did not answer.
@@ -496,9 +547,10 @@ func (rd *reader) readDevices() {
 	}
 }
 
-// readSSHKeys reads the authorized keys of root (not on Windows) and of the
-// users logged in. The agent lists no other users, and a client never names
-// one.
+// readSSHKeys reads the authorized keys of root (not on Windows), of the
+// users the call named in sshUsers, and of the users logged in. The agent
+// lists no other users; a client names a user only through sshUsers, which
+// ParseSSHUsers checked.
 func (rd *reader) readSSHKeys() {
 	if e := rd.gate(agent.CmdSSHGetAuthorizedKeys); e != nil {
 		rd.fail(v1alpha1.SectionSSHKeys, e)
@@ -507,6 +559,11 @@ func (rd *reader) readSSHKeys() {
 	var names []string
 	if !rd.windows {
 		names = append(names, "root")
+	}
+	for _, u := range rd.sshUsers {
+		if !slices.Contains(names, u) {
+			names = append(names, u)
+		}
 	}
 	users, ok := rd.loggedIn(v1alpha1.SectionSSHKeys)
 	if rd.stop {
@@ -540,7 +597,7 @@ func (rd *reader) readSSHKeys() {
 			entry.Keys = nonNil(keys.Keys)
 		case e == nil:
 			return
-		case e.Reason == agent.AgentError && strings.Contains(e.Message, "No such file or directory"):
+		case e.Reason == agent.AgentError && noKeysFile(e.Message):
 			// No authorized_keys file: no keys.
 		default:
 			entry.Reason, entry.Message = apiReason(e.Reason), e.Message
@@ -548,6 +605,13 @@ func (rd *reader) readSSHKeys() {
 		block.Users = append(block.Users, entry)
 	}
 	rd.info.SSHKeys = block
+}
+
+// noKeysFile reports whether guest-ssh-get-authorized-keys failed for a
+// user with no authorized_keys file, which is no keys. A user the guest
+// does not have fails too, and stays an error.
+func noKeysFile(msg string) bool {
+	return strings.Contains(msg, "No such file or directory") && !strings.Contains(msg, "failed to lookup user")
 }
 
 func (rd *reader) readTime() {

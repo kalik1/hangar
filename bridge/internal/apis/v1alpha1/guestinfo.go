@@ -376,7 +376,9 @@ type GuestDeviceID struct {
 }
 
 // GuestSSHKeys is the section "sshkeys": guest-ssh-get-authorized-keys, read
-// only, for root (not on Windows) and the users logged in.
+// only, for root (not on Windows), the users the call names in its
+// "sshUsers" parameter (at most 4, such as the VM's cloud-init user), and
+// the users logged in.
 type GuestSSHKeys struct {
 	Users []GuestUserSSHKeys `json:"users"`
 }

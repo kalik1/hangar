@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -46,7 +47,7 @@ func read(t *testing.T, vm *agent.VM, clk *clocktesting.FakeClock, sections ...s
 	if sections == nil {
 		sections = v1alpha1.Sections
 	}
-	info, err := Read(context.Background(), vm, sections, clk)
+	info, err := Read(context.Background(), vm, Request{Sections: sections}, clk)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -268,6 +269,95 @@ func TestParseSections(t *testing.T) {
 			t.Errorf("ParseSections(%q) = %v, %v", tc.in, got, err)
 		}
 	}
+}
+
+func TestParseSSHUsers(t *testing.T) {
+	for _, tc := range []struct {
+		in   []string
+		want []string
+		bad  bool
+	}{
+		{in: nil, want: nil},
+		{in: []string{""}, want: nil},
+		{in: []string{"k4all"}, want: []string{"k4all"}},
+		{in: []string{"k4all, fedora", "k4all"}, want: []string{"k4all", "fedora"}},
+		{in: []string{"_svc,a-b_c9"}, want: []string{"_svc", "a-b_c9"}},
+		{in: []string{"a,b,c,d"}, want: []string{"a", "b", "c", "d"}},
+		{in: []string{"a,b,c", "d,e"}, bad: true},
+		{in: []string{"Administrator"}, bad: true},
+		{in: []string{"9lives"}, bad: true},
+		{in: []string{"-rf"}, bad: true},
+		{in: []string{"../../etc"}, bad: true},
+		{in: []string{"a b"}, bad: true},
+		{in: []string{"bob\n"}, bad: true},
+		{in: []string{"bob\x00"}, bad: true},
+		{in: []string{"a234567890123456789012345678901"}, want: []string{"a234567890123456789012345678901"}},
+		{in: []string{"a2345678901234567890123456789012"}, want: []string{"a2345678901234567890123456789012"}},
+		{in: []string{"a23456789012345678901234567890123"}, bad: true},
+		{in: []string{`{"execute":"guest-exec"}`}, bad: true},
+	} {
+		got, err := ParseSSHUsers(tc.in)
+		if (err != nil) != tc.bad || (!tc.bad && !slices.Equal(got, tc.want)) {
+			t.Errorf("ParseSSHUsers(%q) = %v, %v", tc.in, got, err)
+		}
+	}
+}
+
+// TestSSHUsers: the users a call names in sshUsers get their keys read
+// too, logged in or not, after root and before the users logged in.
+func TestSSHUsers(t *testing.T) {
+	caller := withSSHUsers(loadFixture(t, "fedora"))
+	clk := clocktesting.NewFakeClock(t0)
+	vm := newVM(caller, clk)
+	req := Request{Sections: []string{v1alpha1.SectionSSHKeys}, SSHUsers: []string{"k4all", "fedora", "root", "ghost"}}
+	info, err := Read(context.Background(), vm, req, clk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, u := range info.SSHKeys.Users {
+		got = append(got, fmt.Sprintf("%s/%d/%s", u.Username, len(u.Keys), u.Reason))
+	}
+	want := []string{"root/0/AgentError", "k4all/1/", "fedora/1/", "ghost/0/AgentError"}
+	if !slices.Equal(got, want) {
+		t.Errorf("ssh keys = %v, want %v", got, want)
+	}
+	// A user the guest does not have is an error, not "no keys", although
+	// glib says ENOENT for it.
+	if m := info.SSHKeys.Users[3].Message; !strings.Contains(m, "failed to lookup user 'ghost'") {
+		t.Errorf("ghost: %q", m)
+	}
+	var keyCalls []string
+	for _, raw := range caller.raw() {
+		if strings.Contains(raw, agent.CmdSSHGetAuthorizedKeys) {
+			keyCalls = append(keyCalls, raw)
+		}
+	}
+	if len(keyCalls) != 4 {
+		t.Errorf("guest-ssh-get-authorized-keys called %d times, want once per user:\n%s", len(keyCalls), strings.Join(keyCalls, "\n"))
+	}
+
+	// Without the sshkeys section, sshUsers reads nothing.
+	caller.reset()
+	if _, err := Read(context.Background(), vm, Request{Sections: []string{v1alpha1.SectionTime}, SSHUsers: []string{"k4all"}}, clk); err != nil {
+		t.Fatal(err)
+	}
+	if got := caller.names(); !slices.Equal(got, []string{agent.CmdInfo, agent.CmdGetTime}) {
+		t.Errorf("called %v", got)
+	}
+}
+
+// withSSHUsers adds two users to a fixture's guest: k4all, not logged in,
+// with a key, and ghost, whom the guest does not have (qemu-ga's message
+// for a user glib cannot look up).
+func withSSHUsers(c *fixtureCaller) *fixtureCaller {
+	c.setReply(agent.CmdSSHGetAuthorizedKeys+" k4all", fixtureReply{
+		Return: json.RawMessage(`{"keys":["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHangarFixtureKeyNotARealKey000000000000000 user@example"]}`)})
+	c.setReply(agent.CmdSSHGetAuthorizedKeys+" ghost", fixtureReply{LibvirtError: &fixtureError{
+		Code:    uint32(libvirt.ErrAgentCommandFailed),
+		Message: "guest agent command failed: unable to execute QEMU agent command 'guest-ssh-get-authorized-keys': failed to lookup user 'ghost': Error getting password entry for ‘ghost’: No such file or directory",
+	}})
+	return c
 }
 
 func TestNotConnected(t *testing.T) {
@@ -516,14 +606,34 @@ func TestHandlerErrors(t *testing.T) {
 	target := guest.Target{Namespace: "vms", Name: "vm", Node: "node-a", Pods: []types.UID{"pod-1"}}
 	call := guest.Call{Target: target, Subresource: "guestinfo", Verb: "get"}
 
-	// A bad section: 400, and no agent call.
-	caller := loadFixture(t, "fedora")
+	// A bad section or bad sshUsers: 400, and no agent call.
+	caller := withSSHUsers(loadFixture(t, "fedora"))
 	h := &Handler{VMs: fixedVM{newVM(caller, clk)}, Clock: clk}
-	w := httptest.NewRecorder()
-	h.ServeGuest(w, httptest.NewRequest(http.MethodGet, "/x?sections=bogus", nil), call)
-	if w.Code != http.StatusBadRequest || len(caller.raw()) != 0 {
-		t.Errorf("bad section: %d %s, %d calls", w.Code, w.Body, len(caller.raw()))
+	for _, q := range []string{
+		"sections=bogus",
+		"sshUsers=..%2F..%2Fetc",
+		"sshUsers=Administrator",
+		"sshUsers=a,b,c&sshUsers=d,e",
+		"sections=sshkeys&sshUsers=bob%0A",
+	} {
+		w := httptest.NewRecorder()
+		h.ServeGuest(w, httptest.NewRequest(http.MethodGet, "/x?"+q, nil), call)
+		if w.Code != http.StatusBadRequest || len(caller.raw()) != 0 {
+			t.Errorf("%s: %d %s, %d calls", q, w.Code, w.Body, len(caller.raw()))
+		}
 	}
+
+	// sshUsers reaches the sshkeys section.
+	w := httptest.NewRecorder()
+	h.ServeGuest(w, httptest.NewRequest(http.MethodGet, "/x?sections=sshkeys&sshUsers=k4all", nil), call)
+	var keys v1alpha1.GuestInfo
+	if err := json.Unmarshal(w.Body.Bytes(), &keys); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("sshUsers: %d %s", w.Code, w.Body)
+	}
+	if u := keys.SSHKeys.Users; len(u) != 3 || u[1].Username != "k4all" || len(u[1].Keys) != 1 {
+		t.Errorf("sshUsers=k4all: %+v", u)
+	}
+	caller.reset()
 
 	// The connection to libvirt breaks: 503.
 	caller.override = func(string) (bool, string, error) { return true, "", libvirt.ErrInterrupted }
