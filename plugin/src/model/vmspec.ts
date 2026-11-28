@@ -211,9 +211,11 @@ export interface WizardInput {
   /**
    * cloud-init: the user Hangar adds (the wizard's default is DEFAULT_USER;
    * none: the image's default user gets the password and keys), or custom
-   * user data that replaces everything.
+   * user data that replaces everything. guestAgentFullAccess: let the QEMU
+   * guest agent reach the whole guest (GUEST_AGENT_FULL_ACCESS); not with
+   * custom user data.
    */
-  cloudInit?: { user?: string; password?: string; sshKeys?: string[]; hostname?: string; custom?: string };
+  cloudInit?: { user?: string; password?: string; sshKeys?: string[]; hostname?: string; custom?: string; guestAgentFullAccess?: boolean };
   runStrategy: string;
   evictionStrategy?: string;
   /** Pin to a host (preferred, not required). */
@@ -246,12 +248,42 @@ export function userNameProblem(name: string): string | null {
 }
 
 /**
+ * "Let the guest agent reach the whole guest" (hangar#15): at first boot,
+ * install the agent if missing; a systemd drop-in that reads an empty
+ * FILTER_RPC_ARGS, so every agent command is on (RHEL and Rocky disable
+ * many; Fedora's unit ignores it); where SELinux is on, a CIL module that
+ * puts the agent's domain (virt_qemu_ga_t) in files_unconfined_type with
+ * chown, fowner and fsetid, so it reads and writes every file while the
+ * domain stays enforcing; then restart the agent. Each line is verbatim
+ * from the lab test of 2026-11-28 (KubeVirt v1.9.1; Fedora 45, Rocky 9.9,
+ * CentOS Stream 10, Ubuntu 24.04, Debian 13). The block adds 669 bytes.
+ */
+export const GUEST_AGENT_FULL_ACCESS = {
+  packages: 'packages: [qemu-guest-agent]',
+  writeFiles: [
+    'write_files:',
+    '  - path: /etc/systemd/system/qemu-guest-agent.service.d/50-hangar.conf',
+    '    content: "[Service]\\nEnvironmentFile=-/etc/hangar/qemu-ga.env\\n"',
+    '  - path: /etc/hangar/qemu-ga.env',
+    '    content: "FILTER_RPC_ARGS=\\n"',
+    '  - path: /etc/hangar/hangar_qemu_ga.cil',
+    '    content: "(typeattributeset files_unconfined_type (virt_qemu_ga_t))\\n(allow virt_qemu_ga_t self (capability (chown fowner fsetid)))\\n"',
+  ],
+  /** Before the runcmd item every VM gets, which stays last. */
+  runcmd: [
+    '  - [sh, -c, "if command -v selinuxenabled >/dev/null && selinuxenabled; then semodule -i /etc/hangar/hangar_qemu_ga.cil; fi"]',
+    '  - [sh, -c, "systemctl daemon-reload; systemctl enable qemu-guest-agent; systemctl restart qemu-guest-agent"]',
+  ],
+};
+
+/**
  * The #cloud-config of a wizard VM. A user is a `users:` entry (cloud-init
  * deprecates `user:`) with what an image's default user has: sudo without
  * a password, bash where the OS has it; its password and SSH keys. Without
  * a user the image's default user gets them. Ubuntu and Debian install the
- * QEMU guest agent (`packages`); every OS enables it (`runcmd`). Custom
- * user data is returned unchanged.
+ * QEMU guest agent (`packages`); every OS enables it (`runcmd`). The
+ * full-access option merges its block into the same keys (one `packages`,
+ * one `write_files`, one `runcmd`). Custom user data is returned unchanged.
  */
 export function cloudInitUserData(c: NonNullable<WizardInput['cloudInit']>, hostname: string, osId?: string): string {
   if (c.custom && c.custom.trim()) return c.custom;
@@ -283,8 +315,11 @@ export function cloudInitUserData(c: NonNullable<WizardInput['cloudInit']>, host
       for (const k of keys) lines.push(`  - ${JSON.stringify(k)}`);
     }
   }
-  if (lacksGuestAgent(osId)) lines.push('packages: [qemu-guest-agent]');
+  const full = !!c.guestAgentFullAccess;
+  if (full || lacksGuestAgent(osId)) lines.push(GUEST_AGENT_FULL_ACCESS.packages);
+  if (full) lines.push(...GUEST_AGENT_FULL_ACCESS.writeFiles);
   lines.push('runcmd:');
+  if (full) lines.push(...GUEST_AGENT_FULL_ACCESS.runcmd);
   lines.push('  - [sh, -c, "systemctl enable --now qemu-guest-agent || rc-update add qemu-guest-agent default || true"]');
   return lines.join('\n') + '\n';
 }
