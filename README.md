@@ -29,7 +29,7 @@ names, related objects, YAML).
 | Storage | Datastores with capacity and capabilities; every disk with its VM, unattached disks |
 | Library | Disk images and ISOs: import from URL or registry, upload from the browser, new VM from an image |
 | Networks | Pod network and bridged/VLAN networks (Multus); create and delete |
-| Published ports | Make a VM's ports reachable inside the cluster, on every host's port (NodePort) or on an address of its own (LoadBalancer: MetalLB or Cilium LB IPAM): presets (SSH, RDP, HTTP, …), lists and ranges, TCP and UDP; live state per port (the VM behind it, the host port, the address and the host that announces it, why it failed); "Reachable at" on the VM summary with lines to copy; every published port of the datacenter in Networks |
+| Published ports | Make a VM's ports reachable inside the cluster, on every host's port (NodePort), on an address of its own (LoadBalancer: MetalLB or Cilium LB IPAM) or at a web address through the ingress with TLS (cert-manager or the ingress's certificate): presets (SSH, RDP, HTTP, …), lists and ranges, TCP and UDP; live state per port (the VM behind it, the host port, the address and the host that announces it, why it failed); "Reachable at" on the VM summary with lines to copy; every published port of the datacenter in Networks |
 | Monitoring | Per-VM and per-host CPU and memory charts; guest agent data (OS, users, filesystems) |
 | Operations | Recent tasks with confirmed outcomes; events in plain words; alarms |
 | Kubernetes | Switch to show object names, related objects, links to Headlamp pages, YAML editor, YAML review before creating a VM |
@@ -216,7 +216,19 @@ label, as `virtctl expose` does) and is owned by the VM, so it goes with it:
   made, a MetalLB `IPAddressPool` with an `L2Advertisement`, or a Cilium
   `CiliumLoadBalancerIPPool` with a `CiliumL2AnnouncementPolicy` and
   Cilium's L2 announcements on. Hangar never creates a pool, and never uses
-  k4all's `k4all-ingress-pool` (the ingress's own address).
+  k4all's `k4all-ingress-pool` (the ingress's own address);
+- **at a web address through the ingress** (an Ingress `<vm>-web-<hash>`, for
+  an HTTP port of the guest): `https://<name>/`, with TLS ending at the
+  ingress. Through Traefik the address answers on HTTPS (443) only. The
+  panel suggests `<vm>-<folder>.<ingress address>.nip.io`, a name public
+  wildcard DNS resolves by itself. The certificate comes from a cert-manager
+  issuer (a ClusterIssuer, or an Issuer of the folder), or is the ingress's
+  default certificate, which browsers warn about. Hangar shows the address
+  the name must point at, the certificate's state (from the Ingress and its
+  Certificate, never the Secret) and tests the address once from the
+  browser. Deleting the VM deletes the Ingress and cert-manager's
+  Certificate; the certificate's Secret stays unless cert-manager runs with
+  `--enable-certificate-owner-ref` (k4all's does not).
 
 Only an adapter on the pod network with NAT (masquerade) or passt can
 publish; a VM on a bridged or VLAN network has its own address there. When
@@ -224,9 +236,13 @@ the adapter lists `ports`, only those reach the guest: Hangar adds the
 published ones, which the guest gets at its next restart. The guest must
 listen on the port and its firewall allow it.
 
-Roles: `hangar-viewer` reads Services, EndpointSlices and the address pools
-(no Secrets); `hangar-vm-operator` publishes (create, patch, delete on
-Services); changing the adapter's port list is a VM edit (`hangar-vm-admin`).
+Roles: `hangar-viewer` reads Services, EndpointSlices, the address pools,
+Ingresses and IngressClasses, cert-manager's Certificates, Issuers and
+ClusterIssuers (no Secrets); `hangar-vm-operator` publishes (create, patch,
+delete on Services and Ingresses); changing the adapter's port list is a VM
+edit (`hangar-vm-admin`). A role bound per folder cannot list the
+cluster-wide IngressClasses and ClusterIssuers: the panel then takes the
+class by name and offers the folder's Issuers and the default certificate.
 Who announces an address shows when the user may also read MetalLB's
 `servicel2statuses` (metallb-system) or Cilium's L2 leases (kube-system);
 Hangar's roles do not grant them.

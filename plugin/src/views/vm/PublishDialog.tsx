@@ -1,7 +1,7 @@
 /*
  * Publish ports: which ports (presets, a list or a range, TCP or UDP), how
- * (inside the cluster, on every host's port, on an address of its own), and
- * the details of each way. It only builds the request: the Published ports
+ * (inside the cluster, on every host's port, on an address of its own, or
+ * a web address through the ingress), and the details of each way. It only builds the request: the Published ports
  * panel runs it and shows its progress on a row.
  */
 
@@ -24,6 +24,7 @@ import React from 'react';
 import { useHangar } from '../../api/data';
 import { useK4all } from '../../api/k4all';
 import { PublishRequest, servicesForNodePorts } from '../../api/ports';
+import { WebRequest, WebWorld } from '../../api/web';
 import {
   autoPool,
   conflictOf,
@@ -45,6 +46,7 @@ import {
   ServicePortIn,
 } from '../../model/ports';
 import { Obj, VM } from '../../model/types';
+import { webPortProblem } from '../../model/web';
 import { useK8s } from '../../shell/settings';
 import { K8sName } from '../../ui/kit';
 import { tabular } from '../../ui/tokens';
@@ -53,20 +55,45 @@ import { vmOs } from '../os';
 import { Note } from '../storage/parts';
 import { Help } from './configParts';
 import { VmPorts } from './portParts';
+import { WebChoice, WebFields } from './WebFields';
 
+/** What the panel runs: Services (req) or a web address (web). */
 export interface PublishSubmit {
-  req: PublishRequest;
-  /** "SSH (22/TCP)", "51 ports (10000-10050/UDP)". */
+  req?: PublishRequest;
+  web?: WebRequest;
+  /** "SSH (22/TCP)", "51 ports (10000-10050/UDP)", "https://web1-lab.192.0.2.10.nip.io/". */
   label: string;
 }
 
-const MODE_HELP: Record<Mode, string> = {
+/** A way of publishing: a Service type, or a web address through the ingress. */
+type Way = Mode | 'web';
+
+const MODE_HELP: Record<Way, string> = {
   cluster: 'Other pods and VMs of the cluster reach it by a DNS name. Not from outside.',
   host: 'Any host of the cluster answers on a port from 30000 to 32767 and passes the traffic to the VM, wherever it runs.',
   address: 'The VM gets an address of its own on the LAN, from an address pool, with the guest\'s own port numbers.',
+  web: "An HTTP port of the guest at https://<name>/ through the cluster's ingress, with a certificate.",
 };
 
-export function PublishDialog({ vm, ports, canEditVm, onClose, onSubmit }: { vm: VM; ports: VmPorts; canEditVm: boolean; onClose: () => void; onSubmit: (s: PublishSubmit) => void }) {
+export function PublishDialog({
+  vm,
+  ports,
+  web,
+  canWeb,
+  canEditVm,
+  onClose,
+  onSubmit,
+}: {
+  vm: VM;
+  ports: VmPorts;
+  /** The folder's web addresses and choices; undefined without the web way. */
+  web?: WebWorld;
+  /** Why the user may not make a web address; null when they may. */
+  canWeb?: string | null;
+  canEditVm: boolean;
+  onClose: () => void;
+  onSubmit: (s: PublishSubmit) => void;
+}) {
   const d = useHangar();
   const t = useTokens();
   const k8s = useK8s();
@@ -85,7 +112,10 @@ export function PublishDialog({ vm, ports, canEditVm, onClose, onSubmit }: { vm:
   const [text, setText] = React.useState(presets[0].ports.map(p => p.port).join(', '));
   const [proto, setProto] = React.useState<Proto>('TCP');
   const [name, setName] = React.useState('');
-  const [mode, setMode] = React.useState<Mode>(usable.length ? 'address' : 'host');
+  const [way, setWay] = React.useState<Way>(usable.length ? 'address' : 'host');
+  // A web address is served by the VM's ClusterIP Service.
+  const mode: Mode = way === 'web' ? 'cluster' : way;
+  const [webChoice, setWebChoice] = React.useState<{ choice: WebChoice | null; problem: string | null }>({ choice: null, problem: null });
   const [outside, setOutside] = React.useState('');
   const [nodeAuto, setNodeAuto] = React.useState(true);
   const [nodePort, setNodePort] = React.useState('');
@@ -107,9 +137,17 @@ export function PublishDialog({ vm, ports, canEditVm, onClose, onSubmit }: { vm:
   const svcNow = existing(mode);
   const keep = keepSrc ?? svcNow?.spec?.externalTrafficPolicy === 'Local';
   const outsideN = outside.trim() ? Number(outside) : NaN;
+  const clusterSvc = existing('cluster');
+  // The guest port the ClusterIP Service already carries (named): a web address reuses it.
+  const reuse = way === 'web' && single ? ((clusterSvc?.spec?.ports ?? []) as any[]).find(x => Number(x.targetPort ?? x.port) === parsed.ports[0].port && (x.protocol ?? 'TCP') === 'TCP' && x.name) : undefined;
+  const nameIn = (p: { port: number; protocol: Proto }) => {
+    const n = single && name.trim() ? portName(p, name.trim()) : portName(p, presetName(p.port));
+    // A web address needs a named port: never one the Service already has for another guest port.
+    return way === 'web' && ((clusterSvc?.spec?.ports ?? []) as any[]).some(x => x.name === n) ? portName(p) : n;
+  };
   const portsIn: ServicePortIn[] = parsed.ports.map(p => ({
-    name: single && name.trim() ? portName(p, name.trim()) : portName(p, presetName(p.port)),
-    port: single && mode !== 'host' && outside.trim() ? outsideN : p.port,
+    name: nameIn(p),
+    port: single && mode !== 'host' && way !== 'web' && outside.trim() ? outsideN : p.port,
     targetPort: p.port,
     protocol: p.protocol,
     ...(mode === 'host' && single && !nodeAuto && nodePort.trim() ? { nodePort: Number(nodePort) } : {}),
@@ -119,10 +157,13 @@ export function PublishDialog({ vm, ports, canEditVm, onClose, onSubmit }: { vm:
   const missing = missingFromList(ports.access.list, guestWants);
   const templateLabel = needsTemplateLabel(vm, ports.selector);
 
+  const webBlocked = way === 'web' ? canWeb ?? (single ? webPortProblem(parsed.ports[0].port, parsed.ports[0].protocol) : 'A web address is one port of the guest') : null;
   let problem: string | null = parsed.error ?? null;
-  if (!problem && single && mode !== 'host' && outside.trim() && !(Number.isInteger(outsideN) && outsideN >= 1 && outsideN <= 65535)) problem = 'The outside port goes from 1 to 65535';
+  if (!problem && webBlocked) problem = webBlocked;
+  if (!problem && single && mode !== 'host' && way !== 'web' && outside.trim() && !(Number.isInteger(outsideN) && outsideN >= 1 && outsideN <= 65535)) problem = 'The outside port goes from 1 to 65535';
   if (!problem && mode === 'host' && single && !nodeAuto) problem = nodePortProblem(Number(nodePort), nodeServices?.items ?? []);
-  if (!problem) problem = conflictOf(portsIn, mode, [...ports.services, ...(svcNow && !ports.services.includes(svcNow) ? [svcNow] : [])], vm.metadata.name);
+  if (!problem && !reuse) problem = conflictOf(portsIn, mode, [...ports.services, ...(svcNow && !ports.services.includes(svcNow) ? [svcNow] : [])], vm.metadata.name);
+  if (!problem && way === 'web') problem = webChoice.problem ?? (webChoice.choice ? null : 'Choose the web address');
   if (!problem && mode === 'address' && !svcNow) {
     if (lbOff) problem = 'No address pool serves VMs';
     else if (!ipAuto) problem = ipProblem(ip.trim(), chosenPool, ports.world.services);
@@ -151,6 +192,27 @@ export function PublishDialog({ vm, ports, canEditVm, onClose, onSubmit }: { vm:
 
   const submit = () => {
     if (problem || !parsed.ports.length) return;
+    const listAdd = missing.length && canEditVm && ports.access.nic ? { nic: ports.access.nic, ports: missing } : undefined;
+    if (way === 'web' && webChoice.choice) {
+      const c = webChoice.choice;
+      onSubmit({
+        label: `https://${c.host}/`,
+        web: {
+          vm,
+          port: reuse ? { ...portsIn[0], name: reuse.name } : portsIn[0],
+          selector: ports.selector,
+          listAdd,
+          templateLabel: templateLabel && canEditVm,
+          host: c.host,
+          className: c.className,
+          traefik: c.traefik,
+          issuer: c.issuer,
+          what: label,
+        },
+      });
+      onClose();
+      return;
+    }
     onSubmit({
       label,
       req: {
@@ -160,7 +222,7 @@ export function PublishDialog({ vm, ports, canEditVm, onClose, onSubmit }: { vm:
         selector: ports.selector,
         lb: lb(),
         keepSourceIp: mode === 'cluster' ? undefined : keep,
-        listAdd: missing.length && canEditVm && ports.access.nic ? { nic: ports.access.nic, ports: missing } : undefined,
+        listAdd,
         templateLabel: templateLabel && canEditVm,
         what: label,
       },
@@ -229,21 +291,22 @@ export function PublishDialog({ vm, ports, canEditVm, onClose, onSubmit }: { vm:
 
         <Box>
           <Box sx={{ fontSize: 13, color: t.muted, mb: 0.5 }}>How</Box>
-          <RadioGroup value={mode} onChange={e => setMode(e.target.value as Mode)}>
-            {MODES.map(m => {
-              const off = m.mode === 'address' && lbOff && !existing('address');
+          <RadioGroup value={way} onChange={e => setWay(e.target.value as Way)}>
+            {[...MODES.map(m => ({ way: m.mode as Way, label: m.label, type: m.type })), ...(web ? [{ way: 'web' as Way, label: 'Web address (through the ingress)', type: 'Ingress' }] : [])].map(m => {
+              const off = m.way === 'address' && lbOff && !existing('address');
+              const webOff = m.way === 'web' ? canWeb ?? (single ? webPortProblem(parsed.ports[0].port, parsed.ports[0].protocol) : parsed.ports.length ? 'A web address is one port of the guest' : null) : null;
               return (
-                <Box key={m.mode} sx={{ mb: 0.5 }}>
+                <Box key={m.way} sx={{ mb: 0.5 }}>
                   <FormControlLabel
-                    value={m.mode}
-                    disabled={off}
+                    value={m.way}
+                    disabled={off || !!webOff}
                     control={<Radio size="small" />}
                     label={
                       <Box>
                         <Box sx={{ fontSize: 14 }}>
                           {m.label} {k8s && <K8sName>{m.type}</K8sName>}
                         </Box>
-                        <Box sx={{ fontSize: 12.5, color: t.muted }}>{MODE_HELP[m.mode]}</Box>
+                        <Box sx={{ fontSize: 12.5, color: t.muted }}>{webOff ?? MODE_HELP[m.way]}</Box>
                       </Box>
                     }
                     sx={{ alignItems: 'flex-start', '& .MuiRadio-root': { mt: -0.5 } }}
@@ -259,7 +322,9 @@ export function PublishDialog({ vm, ports, canEditVm, onClose, onSubmit }: { vm:
           </RadioGroup>
         </Box>
 
-        {mode === 'cluster' && single && (
+        {way === 'web' && web && !webBlocked && <WebFields vm={vm} web={web} onChange={(choice, problem) => setWebChoice({ choice, problem })} />}
+
+        {way === 'cluster' && single && (
           <TextField size="small" label="Port in the cluster" placeholder={String(parsed.ports[0].port)} value={outside} onChange={e => setOutside(e.target.value)} helperText="Same as the guest's when empty" sx={{ width: 220 }} />
         )}
 

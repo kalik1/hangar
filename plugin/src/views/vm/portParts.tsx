@@ -127,6 +127,25 @@ export function lbWords(lb: LbState, svc?: Obj): string {
   }
 }
 
+/** Why "announced" may not show: which host answers for an address is read where the role allows. */
+export const ANNOUNCE_HINT =
+  "Which host announces the address shows as \"announced\" when your role may read MetalLB's servicel2statuses (metallb-system) or Cilium's L2 leases (kube-system): Hangar's roles do not grant them. MetalLB's nodeAssigned Event tells it for its first hour.";
+
+/** The LoadBalancer's state line; "assigned" carries why "announced" may not show. */
+export function LbLine({ lb, svc, sx }: { lb: LbState; svc?: Obj; sx?: object }) {
+  const t = useTokens();
+  const words = lbWords(lb, svc);
+  if (lb.phase !== 'assigned') return <Box sx={{ color: lb.phase === 'failed' ? '#C53030' : undefined, ...sx }}>{words}</Box>;
+  return (
+    <Tooltip title={ANNOUNCE_HINT}>
+      <Box sx={{ display: 'inline-flex', alignItems: 'baseline', gap: 0.5, ...sx }}>
+        {words}
+        <Icon icon="mdi:information-outline" width={13} style={{ color: t.muted, position: 'relative', top: 2 }} aria-label={ANNOUNCE_HINT} />
+      </Box>
+    </Tooltip>
+  );
+}
+
 /** The line a user copies to reach the port: ssh, a URL, or address:port. */
 export function rowCopyLine(row: PortRow, nodes: Obj[], lb: LbState | undefined, user: string | undefined, ipv6: boolean): string | null {
   const guest = row.guest;

@@ -1,6 +1,7 @@
 /*
  * Configure → Published ports: the VM's ports reachable inside the cluster,
- * on every host's port or on an address of its own, each row with its live
+ * on every host's port, on an address of its own or at a web address
+ * through the ingress (WebLine), each row with its live
  * state (the Service, whether the VM is behind it, the host port, the
  * LoadBalancer address and who announces it), and the publish / unpublish
  * changes with the pending → done | failed row state.
@@ -16,22 +17,24 @@ import * as A from '../../api/actions';
 import { errorText } from '../../api/client';
 import { useHangar } from '../../api/data';
 import { NOT_ALLOWED, useCan, useVmPerms } from '../../api/permissions';
-import { forwardToGuest, publishPorts, PublishResult, unpublishPort } from '../../api/ports';
+import { forwardToGuest, publishPorts, unpublishPort } from '../../api/ports';
+import { publishWeb, useWebData } from '../../api/web';
 import { accessProblem, hostAddresses, missingFromList, modeInfo, PortRow, Proto } from '../../model/ports';
-import { VM } from '../../model/types';
+import { Obj, VM } from '../../model/types';
 import { key, powerState } from '../../model/vm';
+import { webRows } from '../../model/web';
 import { hrefFor } from '../../shell/nav';
 import { useK8s } from '../../shell/settings';
-import { openDialog } from '../../ui/dialogs';
-import { confirm } from '../../ui/dialogs';
+import { confirm, openDialog } from '../../ui/dialogs';
 import { IconAction, K8sName, Panel, Tag } from '../../ui/kit';
 import { RowStatus, useRowChange } from '../../ui/rowState';
 import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
 import { Note } from '../storage/parts';
 import { Help } from './configParts';
-import { CopyButton, FirewalldNote, lbWords, LiveLabel, MODE_ICON, rowCopyLine, rowLive, useVmPorts, VmPorts, whereText } from './portParts';
+import { CopyButton, FirewalldNote, LbLine, LiveLabel, MODE_ICON, rowCopyLine, rowLive, useVmPorts, VmPorts, whereText } from './portParts';
 import { PublishDialog, PublishSubmit } from './PublishDialog';
+import { WebLine } from './WebLine';
 
 interface Change extends PublishSubmit {
   id: number;
@@ -46,6 +49,12 @@ export function PortsPanel({ vm }: { vm: VM }) {
   const canPatch = useCan({ verb: 'patch', group: '', resource: 'services', namespace: vmNs });
   const canDelete = useCan({ verb: 'delete', group: '', resource: 'services', namespace: vmNs });
   const perms = useVmPerms(vmNs);
+  const web = useWebData(vmNs);
+  const canIngress = useCan({ verb: 'create', group: 'networking.k8s.io', resource: 'ingresses', namespace: vmNs });
+  const canDeleteIngress = useCan({ verb: 'delete', group: 'networking.k8s.io', resource: 'ingresses', namespace: vmNs });
+  const webServed = web.ingresses !== 'missing';
+  const canWeb = !canIngress ? `${NOT_ALLOWED}: a web address creates an Ingress (the hangar-vm-operator role)` : web.loaded && web.classes?.length === 0 ? 'No ingress class on this cluster' : null;
+  const wrows = React.useMemo(() => webRows(Array.isArray(web.ingresses) ? web.ingresses : [], ports.services, vm.metadata.name), [web.ingresses, ports.services, vm.metadata.name]);
   const [changes, setChanges] = React.useState<Change[]>([]);
   const [listChangedAt, setListChangedAt] = React.useState<number | null>(null);
   const seq = React.useRef(0);
@@ -57,7 +66,15 @@ export function PortsPanel({ vm }: { vm: VM }) {
   const hostRows = ports.rows.some(r => r.mode === 'host');
   const publish = () =>
     openDialog(close => (
-      <PublishDialog vm={vm} ports={ports} canEditVm={perms.edit} onClose={close} onSubmit={s => setChanges(c => [...c, { ...s, id: ++seq.current }])} />
+      <PublishDialog
+        vm={vm}
+        ports={ports}
+        web={webServed ? web : undefined}
+        canWeb={canWeb}
+        canEditVm={perms.edit}
+        onClose={close}
+        onSubmit={s => setChanges(c => [...c, { ...s, id: ++seq.current }])}
+      />
     ));
 
   return (
@@ -112,14 +129,20 @@ export function PortsPanel({ vm }: { vm: VM }) {
           key={c.id}
           change={c}
           onVmChanged={() => setListChangedAt(Date.now())}
-          onSettled={() => ports.world.refresh()}
+          onSettled={() => {
+            ports.world.refresh();
+            web.refresh();
+          }}
           onGone={() => setChanges(cs => cs.filter(x => x.id !== c.id))}
         />
       ))}
       {ports.rows.map(r => (
         <PortLine key={r.key} row={r} vm={vm} ports={ports} canChange={canPatch && canDelete} canEditVm={perms.edit} onVmChanged={() => setListChangedAt(Date.now())} />
       ))}
-      {!ports.rows.length && !changes.length && !problem && (
+      {wrows.map(r => (
+        <WebLine key={r.key} row={r} vm={vm} ports={ports} web={web} canDelete={canDeleteIngress} />
+      ))}
+      {!ports.rows.length && !wrows.length && !changes.length && !problem && (
         <Box sx={{ px: 2, py: 1.5, fontSize: 14, color: t.muted, borderTop: `1px solid ${t.rule}` }}>
           {ports.world.loaded
             ? ports.world.denied.services
@@ -152,15 +175,17 @@ function listText(list: VmPorts['access']['list']): string {
 function ChangeLine({ change, onVmChanged, onSettled, onGone }: { change: Change; onVmChanged: () => void; onSettled: () => void; onGone: () => void }) {
   const t = useTokens();
   const row = useRowChange<Change>();
-  const [result, setResult] = React.useState<PublishResult | null>(null);
+  const [result, setResult] = React.useState<{ service?: Obj; ingress?: Obj; vmChanged: boolean } | null>(null);
   const started = React.useRef(false);
-  const m = modeInfo(change.req.mode);
+  const isWeb = !!change.web;
+  const mode = change.req?.mode ?? 'cluster';
+  const m = isWeb ? { label: 'At a web address' } : modeInfo(mode);
   React.useEffect(() => {
     if (started.current) return;
     started.current = true;
     row.run(change, async () => {
       try {
-        const r = await publishPorts(change.req);
+        const r = change.web ? await publishWeb(change.web) : await publishPorts(change.req!);
         setResult(r);
         if (r.vmChanged) onVmChanged();
       } finally {
@@ -177,17 +202,18 @@ function ChangeLine({ change, onVmChanged, onSettled, onGone }: { change: Change
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [row.state.phase]);
   const svc = result?.service;
-  const nodePorts = svc ? ((svc.spec?.ports ?? []) as any[]).filter(p => change.req.ports.some(x => x.port === p.port && x.protocol === (p.protocol ?? 'TCP'))).map(p => p.nodePort).filter(Boolean) : [];
-  const done =
-    change.req.mode === 'host'
+  const nodePorts = svc && change.req ? ((svc.spec?.ports ?? []) as any[]).filter(p => change.req!.ports.some(x => x.port === p.port && x.protocol === (p.protocol ?? 'TCP'))).map(p => p.nodePort).filter(Boolean) : [];
+  const done = isWeb
+    ? `Published ${change.label}: the ingress routes it to the VM.`
+    : mode === 'host'
       ? `Published ${change.label} on every host's port ${nodePorts.join(', ')}.`
-      : change.req.mode === 'address'
+      : mode === 'address'
       ? `Published ${change.label}: the Service waits for its address.`
       : `Published ${change.label} at ${svc?.metadata.name}.${svc?.metadata.namespace}.svc.`;
   return (
     <Box sx={{ px: 2, py: 1, borderTop: `1px solid ${t.rule}` }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, fontSize: 14 }}>
-        <Icon icon={MODE_ICON[change.req.mode]} width={18} style={{ color: t.muted, flex: 'none' }} />
+        <Icon icon={isWeb ? 'mdi:web' : MODE_ICON[mode]} width={18} style={{ color: t.muted, flex: 'none' }} />
         <b>{change.label}</b>
         <Box sx={{ color: t.muted }}>{m.label.toLowerCase()}</Box>
         <Box sx={{ flex: 1 }} />
@@ -196,7 +222,7 @@ function ChangeLine({ change, onVmChanged, onSettled, onGone }: { change: Change
       <RowStatus
         state={row.state}
         sx={{ mt: 0.25, ml: 3.75 }}
-        pending={`Publishing ${m.label.toLowerCase()}${change.req.listAdd ? ", then adding to the adapter's port list" : ''}…`}
+        pending={`Publishing ${m.label.toLowerCase()}${(change.req ?? change.web)?.listAdd ? ", then adding to the adapter's port list" : ''}…`}
         done={
           <>
             {done}
@@ -264,8 +290,7 @@ function PortLine({ row, vm, ports, canChange, canEditVm, onVmChanged }: { row: 
             {hosts.length > 4 ? `, and ${hosts.length - 4} more` : ''}
           </Box>
         )}
-        {live.lb && <Box sx={{ color: live.lb.phase === 'failed' ? '#C53030' : undefined }}>{lbWords(live.lb, svc)}</Box>}
-        {live.lb?.phase === 'assigned' && ports.world.denied.announcers && <Box>Hangar cannot read who announces it (your role).</Box>}
+        {live.lb && <LbLine lb={live.lb} svc={svc} />}
         {svc.spec?.externalTrafficPolicy === 'Local' && <Box>Keeps the client's address: only the host the VM runs on answers.</Box>}
         {!row.managed && <Box>Service {svc.metadata.name} selects this VM: change it where it was made.</Box>}
         {k8s && row.managed && (

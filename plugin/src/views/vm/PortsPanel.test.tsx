@@ -3,6 +3,7 @@ import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import * as A from '../../api/actions';
 import { publishPorts } from '../../api/ports';
+import { publishWeb, runUrlTest } from '../../api/web';
 import { Obj } from '../../model/types';
 import { openDialog } from '../../ui/dialogs';
 import { PortsPanel } from './PortsPanel';
@@ -28,7 +29,35 @@ const services = [
   { metadata: { name: 'legacy', namespace: 'lab' }, spec: { type: 'ClusterIP', clusterIP: '10.96.0.9', selector: { app: 'web' }, ports: [{ port: 8080, targetPort: 8080 }] } },
 ];
 
+const host = 'web1-lab.192.0.2.10.nip.io';
+const ingress = (issuer: boolean, status = true): Obj => ({
+  metadata: {
+    name: 'web1-web-abcde',
+    namespace: 'lab',
+    labels: { 'app.kubernetes.io/managed-by': 'hangar', 'hangar.magesgate.com/vm': 'web1' },
+    annotations: issuer ? { 'cert-manager.io/cluster-issuer': 'lab-ca' } : {},
+  },
+  spec: {
+    ingressClassName: 'traefik',
+    ...(issuer ? { tls: [{ hosts: [host], secretName: 'web1-web-abcde-tls' }] } : {}),
+    rules: [{ host, http: { paths: [{ path: '/', pathType: 'Prefix', backend: { service: { name: 'web1-cluster', port: { name: 'http' } } } }] } }],
+  },
+  status: status ? { loadBalancer: { ingress: [{ ip: '192.0.2.10' }] } } : {},
+});
+const clusterSvc = hangar('web1-cluster', 'ClusterIP', [{ name: 'http', port: 80, targetPort: 80, protocol: 'TCP' }]);
+
+const emptyWeb = () => ({
+  loaded: true,
+  ingresses: [] as Obj[] | 'denied' | 'missing',
+  certificates: [] as Obj[] | 'denied',
+  issuers: [] as Obj[] | 'denied' | 'missing',
+  clusterIssuers: [] as Obj[] | 'denied' | 'missing',
+  classes: [{ name: 'traefik', controller: 'traefik.io/ingress-controller', isDefault: true }] as any,
+  refresh: vi.fn(),
+});
+
 const state = {
+  web: emptyWeb(),
   vmi: vmi as Obj | undefined,
   world: {
     loaded: true,
@@ -70,6 +99,19 @@ vi.mock('../../api/permissions', () => ({
   useCan: () => true,
   useVmPerms: () => ({ power: true, edit: true, remove: true, console: true, migrate: true }),
 }));
+vi.mock('../../api/web', () => ({
+  useWebData: () => state.web,
+  // Another Ingress of the ingress's class: its status has the ingress's address (and its host is taken).
+  webContext: () =>
+    Promise.resolve({
+      ingresses: [{ metadata: { name: 'dash', namespace: 'k4all' }, spec: { ingressClassName: 'traefik', rules: [{ host: 'dashboard.192.0.2.10.nip.io' }] }, status: { loadBalancer: { ingress: [{ ip: '192.0.2.10' }] } } }],
+      services: [],
+    }),
+  publishWeb: vi.fn(),
+  unpublishWeb: vi.fn(),
+  runUrlTest: vi.fn(),
+  urlTestBlocked: () => false,
+}));
 vi.mock('../../api/hardware', () => ({
   useInventories: () => ({ loaded: true, missing: false, denied: false, hosts: new Map([['host-a', { inv: { firewalld: true }, at: 0 }]]) }),
 }));
@@ -89,6 +131,8 @@ const show = (v: Obj) =>
 
 beforeEach(() => {
   state.vmi = vmi;
+  state.web = emptyWeb();
+  state.world.services = services;
   vi.mocked(publishPorts).mockReset();
   vi.mocked(openDialog).mockReset();
 });
@@ -105,6 +149,18 @@ describe('Published ports panel', () => {
     expect(screen.getByText("The VM's pod is not selected yet")).toBeTruthy();
     // firewalld runs on a host and there is a host port.
     expect(screen.getByText(/firewalld runs on host-a/)).toBeTruthy();
+  });
+
+  it('an address with no known announcer: assigned, and the tooltip says what "announced" needs', () => {
+    const prev = state.world.announcers;
+    state.world.announcers = new Map();
+    try {
+      show(vm(listed));
+      expect(screen.getByText(/203.0.113.5 from pool cil; no host announces it yet/)).toBeTruthy();
+      expect(screen.getByLabelText(/servicel2statuses .* Hangar's roles do not grant them/)).toBeTruthy();
+    } finally {
+      state.world.announcers = prev;
+    }
   });
 
   it("says which ports the adapter's list forwards, and flags a published port missing from it", () => {
@@ -174,5 +230,106 @@ describe('Published ports panel', () => {
     show(vm({ name: 'default', bridge: {} }));
     expect(screen.getByText(/joins the pod network as a bridge/)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Publish' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe('web addresses', () => {
+  const withWeb = (ing: Obj, certs: Obj[] | 'denied' = []) => {
+    state.world.services = [...services, clusterSvc];
+    state.web = { ...emptyWeb(), ingresses: [ing], certificates: certs };
+  };
+  it("with the ingress's default certificate: the address to point at, the browser warning, the VM behind it", () => {
+    withWeb(ingress(false));
+    state.world.slices = [...state.world.slices, slice('web1-cluster', true)];
+    show(vm(listed));
+    expect(screen.getByRole('link', { name: `https://${host}/` })).toBeTruthy();
+    expect(screen.getByText(/this nip.io name already does/)).toBeTruthy();
+    expect(screen.getByText("The ingress's default certificate: browsers warn")).toBeTruthy();
+    expect(screen.getByText(/Browsers will warn that this connection is not private/)).toBeTruthy();
+    expect(screen.getAllByText('The VM is behind it').length).toBeGreaterThanOrEqual(3);
+  });
+  it('with an issuer: requesting, valid until, failed, unknown', () => {
+    const cert = (conditions: any[], extra: any = {}): Obj => ({ metadata: { name: 'web1-web-abcde-tls', namespace: 'lab' }, spec: { secretName: 'web1-web-abcde-tls' }, status: { conditions, ...extra } });
+    withWeb(ingress(true, false), []);
+    const r = show(vm(listed));
+    expect(screen.getByText('Waiting for the ingress to publish its address')).toBeTruthy();
+    expect(screen.getByText(/Requesting a certificate from lab-ca/)).toBeTruthy();
+    r.unmount();
+    withWeb(ingress(true), [cert([{ type: 'Ready', status: 'True' }], { notAfter: '2027-02-26T10:00:00Z' })]);
+    const r2 = show(vm(listed));
+    expect(screen.getByText(/Certificate valid until/)).toBeTruthy();
+    r2.unmount();
+    withWeb(ingress(true), [cert([{ type: 'Issuing', status: 'False', reason: 'Failed', message: 'issuer lab-ca not ready' }])]);
+    const r3 = show(vm(listed));
+    expect(screen.getByText('Certificate failed: issuer lab-ca not ready')).toBeTruthy();
+    r3.unmount();
+    withWeb(ingress(true), 'denied');
+    show(vm(listed));
+    expect(screen.getByText('Certificate unknown: your role cannot read Certificates')).toBeTruthy();
+  });
+  it('tests the address once and says what the answer proves', async () => {
+    withWeb(ingress(false));
+    vi.mocked(runUrlTest).mockResolvedValue('refused');
+    show(vm(listed));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Test the address' }));
+    });
+    expect(screen.getByText(/The browser refused the certificate or could not reach the name/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: `Open ${host}` })).toBeTruthy();
+    expect(vi.mocked(runUrlTest).mock.calls[0][0]).toBe(`https://${host}/`);
+  });
+  it('publishes a web address for HTTP through the dialog, on the ClusterIP Service it already has', async () => {
+    state.world.services = [...services, clusterSvc];
+    state.web = {
+      ...emptyWeb(),
+      clusterIssuers: [{ metadata: { name: 'lab-ca' }, spec: { ca: { secretName: 'ca' } }, status: { conditions: [{ type: 'Ready', status: 'True' }] } }],
+    };
+    let dialog: ((close: () => void) => React.ReactNode) | null = null;
+    vi.mocked(openDialog).mockImplementation(r => {
+      dialog = r as any;
+      return () => undefined;
+    });
+    vi.mocked(publishWeb).mockResolvedValue({ ingress: ingress(true), vmChanged: false });
+    show(vm({ name: 'default', masquerade: {} }));
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    const shown = render(<MemoryRouter>{dialog!(() => undefined)}</MemoryRouter>);
+    const dlg = screen.getByRole('dialog');
+    // SSH 22 is first; HTTPS is offered no web address (the guest would serve TLS).
+    fireEvent.click(within(dlg).getByText('HTTPS 443'));
+    expect(within(dlg).getByText(/The guest serves HTTPS here/)).toBeTruthy();
+    fireEvent.click(within(dlg).getByText('HTTP 80'));
+    fireEvent.click(within(dlg).getByLabelText(/Web address \(through the ingress\)/));
+    // The suggested name comes from the ingress's address in an Ingress's status.
+    expect(await within(dlg).findByDisplayValue('web1-lab.192.0.2.10.nip.io')).toBeTruthy();
+    expect(within(dlg).getByText(/HTTPS \(443\) only/)).toBeTruthy();
+    // The default certificate is said plainly; then an issuer is picked.
+    expect(within(dlg).getByText(/Browsers will warn/)).toBeTruthy();
+    fireEvent.mouseDown(within(dlg).getByLabelText('Certificate'));
+    fireEvent.click(await screen.findByRole('option', { name: /lab-ca/ }));
+    await act(async () => {
+      fireEvent.click(within(dlg).getByRole('button', { name: 'Publish' }));
+    });
+    shown.unmount();
+    const req = vi.mocked(publishWeb).mock.calls[0][0];
+    expect(req).toMatchObject({
+      host: 'web1-lab.192.0.2.10.nip.io',
+      className: 'traefik',
+      traefik: true,
+      issuer: { kind: 'ClusterIssuer', name: 'lab-ca' },
+      port: { name: 'http', port: 80, targetPort: 80, protocol: 'TCP' },
+    });
+    expect(await screen.findByText(/the ingress routes it to the VM/)).toBeTruthy();
+  });
+  it('with no ingress class the web way is off, and says why', async () => {
+    vi.mocked(openDialog).mockImplementation(r => {
+      render(<MemoryRouter>{(r as any)(() => undefined)}</MemoryRouter>);
+      return () => undefined;
+    });
+    state.web = { ...emptyWeb(), classes: [] };
+    show(vm({ name: 'default', masquerade: {} }));
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    const dlg = screen.getByRole('dialog');
+    fireEvent.click(within(dlg).getByText('HTTP 80'));
+    expect(within(dlg).getByText('No ingress class on this cluster')).toBeTruthy();
   });
 });

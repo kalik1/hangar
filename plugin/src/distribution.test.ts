@@ -56,6 +56,11 @@ describe('roles for published ports', () => {
   it('the VM operator creates, patches and deletes Services', () => {
     expect(verbs('hangar-vm-operator-rules', '', 'services')).toEqual(['create', 'delete', 'patch']);
   });
+  it('web addresses: the viewer reads Ingresses, classes, Certificates and issuers; the VM operator writes Ingresses', () => {
+    for (const r of ['ingresses', 'ingressclasses']) expect(verbs('hangar-viewer', 'networking.k8s.io', r)).toEqual(['get', 'list', 'watch']);
+    for (const r of ['certificates', 'issuers', 'clusterissuers']) expect(verbs('hangar-viewer', 'cert-manager.io', r)).toEqual(['get', 'list', 'watch']);
+    expect(verbs('hangar-vm-operator-rules', 'networking.k8s.io', 'ingresses')).toEqual(['create', 'delete', 'patch']);
+  });
   // Still no Secret read: 'roles and Secrets' below.
 });
 

@@ -19,7 +19,7 @@ import { Column, DataTable } from '../../ui/DataTable';
 import { K8sName, Panel, Tag } from '../../ui/kit';
 import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
-import { lbWords, LiveLabel, MODE_ICON, rowLive, whereText } from '../vm/portParts';
+import { LbLine, LiveLabel, MODE_ICON, rowLive, whereText } from '../vm/portParts';
 
 export function PublishedPorts({ focus }: { focus?: boolean }) {
   const d = useHangar();
@@ -92,7 +92,7 @@ export function PublishedPorts({ focus }: { focus?: boolean }) {
           <Box sx={{ ...tabular, minWidth: 0 }}>
             <Box sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.mode === 'host' && r.nodePort && hosts[0] ? `${hosts[0].ip}:${r.nodePort}` : whereText(r, live.lb)}</Box>
             {r.mode === 'host' && hosts.length > 1 && <Box sx={{ fontSize: 12.5, color: t.muted }}>or any of {hosts.length} host addresses</Box>}
-            {live.lb && live.lb.phase !== 'waiting' && <Box sx={{ fontSize: 12.5, color: t.muted }}>{lbWords(live.lb, r.service)}</Box>}
+            {live.lb && live.lb.phase !== 'waiting' && <LbLine lb={live.lb} svc={r.service} sx={{ fontSize: 12.5, color: t.muted }} />}
             {k8s && <K8sName>service/{r.service.metadata.name}</K8sName>}
           </Box>
         );
