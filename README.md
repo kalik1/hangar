@@ -16,7 +16,7 @@ names, related objects, YAML).
 | Inventory | Datacenter → folders (namespaces) → VMs and templates; hosts → running VMs; search by name, IP, host, tag, notes |
 | Dashboard | CPU, memory and storage capacity (used, allocated, overcommit), VM states, hosts, alarms, recent tasks |
 | VMs | Power on, shut down (guest), restart (guest), suspend, resume, power off, reset; bulk actions; right-click menu |
-| Console | Graphical (VNC) and serial consoles, in the page or in windows; Ctrl+Alt+Del and special keys; type text into the guest; screenshots; live thumbnails |
+| Console | Graphical (VNC) and serial consoles, in the page or in windows; the desktop resizes with the window (VirtIO video); Ctrl+Alt+Del and special keys; type text into the guest; screenshots; live thumbnails |
 | Create | Wizard: library image, ISO install, disk image URL, container registry, empty disk; CPU/memory or size profile; firmware, Secure Boot, TPM; disks and datastore; networks; cloud-init |
 | Configure | CPU, memory, size profile, firmware, persistent UEFI variables and TPM; CPU flags, reservation and limits, hot-add of CPUs and memory; add, attach, expand, eject, remove disks and CD/DVDs, also while the VM runs (hot-plug); disk cache, I/O mode, I/O threads, serial, read-only, shareable, error policy, block size; network adapters (network, model, link up/down, multi-queue); devices (headless, video card, audio, RNG, watchdog, crash reports, VSOCK, host metrics); shared folders (virtiofs); boot order; power policy; behaviour on host maintenance; shutdown timeout; host pinning; tags; cloud-init; notes |
 | Options | Delete protection, start paused, guest clock (UTC, time zone, offset), tablet pointer, ACPI, SMBIOS (UUID, serial, chassis), guest OS tuning; machine type (the versions the hosts offer and KubeVirt accepts) |
@@ -48,7 +48,7 @@ names, related objects, YAML).
 | Hangar's node agent (below), IOMMU on the hosts | Host devices (PCI, GPU, USB passthrough, host disks) |
 | KubeVirt's `Sidecar` feature gate, spice-vdagent in the guest | Clipboard sharing with the console (below) |
 | KubeVirt's `DeclarativeHotplugVolumes` feature gate (not with `HotplugVolumes`) | Disks and CD/DVD media in and out of a running VM |
-| KubeVirt's `ExpandDisks`, `VideoConfig`, `PanicDevices`, `VSOCK`, `DownwardMetrics`, `EnableVirtioFsStorageVolumes`/`EnableVirtioFsConfigVolumes` feature gates | A running guest sees a disk grow; video card choice; crash reports; VSOCK; host metrics; shared folders |
+| KubeVirt's `ExpandDisks`, `VideoConfig`, `PanicDevices`, `VSOCK`, `DownwardMetrics`, `EnableVirtioFsStorageVolumes`/`EnableVirtioFsConfigVolumes` feature gates | A running guest sees a disk grow; video card choice (VirtIO: the desktop resizes with the console window); crash reports; VSOCK; host metrics; shared folders |
 | The `LiveMigrate` workload update method in the KubeVirt resource | Adding CPUs and memory to a running VM, live disk moves |
 | Kubernetes 1.30 or newer and `distribution/protection-policy.yaml` | Delete protection (below) |
 | TopoLVM, Rook-Ceph (optional) | Per-host thin pools; Ceph pool capacity and links to [Cairn](https://github.com/kalik1/cairn) |
