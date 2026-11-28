@@ -14,13 +14,13 @@ import MenuItem from '@mui/material/MenuItem';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import React from 'react';
-import * as A from '../../api/actions';
 import { HangarData } from '../../api/data';
 import * as E from '../../model/edit';
 import { DiskRow } from '../../model/storage';
 import { formatBytes } from '../../model/units';
 import { isTemplate, key, powerState } from '../../model/vm';
 import { useTokens } from '../../ui/useTokens';
+import { saveVm } from '../vm/configParts';
 
 export function AttachDiskDialog({ row, d, onClose }: { row: DiskRow; d: HangarData; onClose: () => void }) {
   const t = useTokens();
@@ -71,6 +71,7 @@ export function AttachDiskDialog({ row, d, onClose }: { row: DiskRow; d: HangarD
           <MenuItem value="sata">SATA</MenuItem>
           <MenuItem value="scsi">SCSI</MenuItem>
         </TextField>
+        {vm && E.isFormerBootDisk(vm, row.name) && <Typography sx={{ fontSize: 13, color: t.muted }}>It was this VM&apos;s boot disk: it gets its boot order back.</Typography>}
         {running && <Typography sx={{ fontSize: 13, color: t.muted }}>The VM is running: the disk appears at its next power-on.</Typography>}
       </DialogContent>
       <DialogActions>
@@ -80,7 +81,7 @@ export function AttachDiskDialog({ row, d, onClose }: { row: DiskRow; d: HangarD
           disableElevation
           disabled={!vm}
           onClick={() => {
-            if (vm) A.updateVm(vm, `Attach disk ${row.name}`, E.attachDisk(vm, row.name, bus).vm).catch(() => undefined);
+            if (vm) saveVm(vm, `Attach disk ${row.name}`, E.attachDisk(vm, row.name, bus).vm).catch(() => undefined);
             onClose();
           }}
         >

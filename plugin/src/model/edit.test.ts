@@ -52,9 +52,15 @@ describe('edits', () => {
     expect(d.find((x: any) => x.name === 'root').bootOrder).toBe(2);
   });
   it('sets the boot order across disks and adapters', () => {
-    const v = E.setBootOrder(vm(), ['default', 'root']);
+    const { vm: v, dropped } = E.setBootOrder(vm(), ['default', 'root']);
     expect(v.spec.template.spec.domain.devices.interfaces[0].bootOrder).toBe(1);
     expect(v.spec.template.spec.domain.devices.disks[0].bootOrder).toBe(2);
+    expect(dropped).toEqual([]);
+  });
+  it('says which devices a new boot order leaves out', () => {
+    const { vm: v, dropped } = E.setBootOrder(vm(), ['default']);
+    expect(dropped).toEqual(['root']);
+    expect(v.spec.template.spec.domain.devices.disks[0].bootOrder).toBeUndefined();
   });
   it('adds, rewires and removes network adapters', () => {
     const { vm: a, name } = E.addNic(vm(), 'prod/vlan10', 'virtio');
@@ -86,5 +92,90 @@ describe('edits', () => {
     E.addBlankDisk(a, { sizeBytes: 1, bus: 'virtio' });
     E.setFirmware(a, 'uefi-secure', true);
     expect(JSON.stringify(a)).toBe(before);
+  });
+});
+
+/** A wizard VM: UEFI, a TPM, the root disk from a template with boot order 1, the cloud-init disk. */
+const efiVm = () => ({
+  metadata: { name: 'web', namespace: 'prod', resourceVersion: '3' },
+  spec: {
+    dataVolumeTemplates: [{ metadata: { name: 'web-rootdisk' }, spec: {} }],
+    template: {
+      spec: {
+        domain: {
+          firmware: { bootloader: { efi: { secureBoot: false } } },
+          devices: {
+            tpm: { persistent: true },
+            disks: [
+              { name: 'cloudinitdisk', disk: { bus: 'virtio' } },
+              { name: 'rootdisk', disk: { bus: 'virtio' }, bootOrder: 1 },
+            ],
+            interfaces: [{ name: 'default', masquerade: {} }],
+          },
+        },
+        volumes: [
+          { name: 'cloudinitdisk', cloudInitNoCloud: { userData: '#cloud-config\n' } },
+          { name: 'rootdisk', dataVolume: { name: 'web-rootdisk' } },
+        ],
+      },
+    },
+  },
+});
+const devs = (v: any) => v.spec.template.spec.domain.devices;
+const bootOf = (v: any, name: string) => devs(v).disks.find((d: any) => d.name === name)?.bootOrder;
+
+describe('boot order through disk edits', () => {
+  it('keeps the boot disk first when disks are added, attached and removed', () => {
+    const a = E.addBlankDisk(efiVm(), { sizeBytes: 2 ** 30, bus: 'virtio' });
+    const b = E.attachDisk(a.vm, 'web-spare', 'virtio');
+    const c = E.removeDisk(b.vm, a.name);
+    for (const v of [a.vm, b.vm, c.vm]) expect(bootOf(v, 'rootdisk')).toBe(1);
+    expect(b.bootOrder).toBeUndefined();
+    expect(bootOf(b.vm, b.name)).toBeUndefined();
+    expect(E.bootOrderWarning(efiVm(), c.vm)).toBeUndefined();
+  });
+
+  it('gives the former boot disk its boot order back when it is attached again', () => {
+    const removed = E.removeDisk(efiVm(), 'rootdisk');
+    expect(removed).toMatchObject({ claim: 'web-rootdisk', owned: true });
+    expect(E.hasBootOrder(removed.vm)).toBe(false);
+    expect(E.isFormerBootDisk(removed.vm, 'web-rootdisk')).toBe(true);
+    // Saving that asks first: a UEFI VM with no boot order may stop at the cloud-init disk.
+    expect(E.bootOrderWarning(efiVm(), removed.vm)).toMatch(/boot order/);
+
+    const back = E.attachDisk(removed.vm, 'web-rootdisk', 'virtio');
+    expect(back.bootOrder).toBe(1);
+    expect(bootOf(back.vm, back.name)).toBe(1);
+    expect(back.vm.metadata.annotations?.[E.A_FORMER_BOOT_DISK]).toBeUndefined();
+    expect(E.bootOrderWarning(removed.vm, back.vm)).toBeUndefined();
+  });
+
+  it('attaches the former boot disk of a running VM for the next power-on, after the devices that boot now', () => {
+    const removed = E.removeDisk(efiVm(), 'rootdisk');
+    const withIso = E.insertIso(removed.vm, { namespace: 'lib', name: 'rescue', sizeBytes: 100 }, true);
+    const back = E.attachDisk(withIso, 'web-rootdisk', 'virtio', true);
+    expect(back.bootOrder).toBe(2);
+    expect(back.vm.spec.template.spec.volumes.find((v: any) => v.name === back.name).persistentVolumeClaim).toEqual({ claimName: 'web-rootdisk' });
+  });
+
+  it('remembers only the boot disk, and another disk attached gets no boot order', () => {
+    const a = E.addBlankDisk(efiVm(), { sizeBytes: 2 ** 30, bus: 'virtio', name: 'data' });
+    const r = E.removeDisk(a.vm, 'data');
+    expect(r.vm.metadata.annotations?.[E.A_FORMER_BOOT_DISK]).toBeUndefined();
+    const removed = E.removeDisk(efiVm(), 'rootdisk');
+    const other = E.attachDisk(removed.vm, 'web-data', 'virtio');
+    expect(other.bootOrder).toBeUndefined();
+    expect(E.isFormerBootDisk(other.vm, 'web-rootdisk')).toBe(true);
+  });
+
+  it('warns on a UEFI VM left with no boot order, not on BIOS or an unrelated edit', () => {
+    const none = E.setBootOrder(efiVm(), []).vm;
+    expect(E.bootOrderWarning(efiVm(), none)).toMatch(/UEFI/);
+    // Already without one, and the disks did not change: no warning on every save.
+    expect(E.bootOrderWarning(none, E.setTags(none, { tier: 'web' }, () => true))).toBeUndefined();
+    // Already without one, and a disk is attached: say so.
+    expect(E.bootOrderWarning(none, E.attachDisk(none, 'web-data', 'virtio').vm)).toMatch(/boot order/);
+    const bios = E.setFirmware(efiVm(), 'bios', false);
+    expect(E.bootOrderWarning(bios, E.setBootOrder(bios, []).vm)).toBeUndefined();
   });
 });

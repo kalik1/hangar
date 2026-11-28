@@ -248,6 +248,11 @@ export function isVmManagedClaim(pvc: Obj | undefined, dv: Obj | undefined): boo
   );
 }
 
+/** KubeVirt's backend storage of a VM: its TPM and UEFI state ("persistent-state-for": the VM's name). */
+export function isVmStateClaim(pvc: Obj | undefined): boolean {
+  return !!pvc?.metadata.labels?.['persistent-state-for'];
+}
+
 export const L_IMAGE = 'hangar.magesgate.com/image';
 
 export function isImageClaim(o: Obj, libraryNs: string): boolean {
@@ -262,9 +267,10 @@ export function classifyDisk(
 ): DiskKind {
   const o = (pvc ?? dv) as Obj;
   if (pvc && isInternalClaim(pvc)) return 'internal';
+  // KubeVirt's VM state (TPM, UEFI variables): never a disk to attach.
+  if (isVmStateClaim(pvc)) return 'internal';
   if (isImageClaim(o, libraryNs) || (dv && isImageClaim(dv, libraryNs))) return 'image';
   if (uses?.length) return 'vm';
-  if (pvc?.metadata.labels?.['persistent-state-for']) return 'unattached';
   if (isVmManagedClaim(pvc, dv)) return 'unattached';
   return 'container';
 }
@@ -385,7 +391,7 @@ export interface DiskRow {
 
 export interface DiskInventory {
   rows: DiskRow[];
-  /** How many claims were hidden as CDI internals. */
+  /** How many claims were hidden: CDI internals, and VM state claims whose VM is gone. */
   hidden: number;
 }
 
@@ -407,7 +413,10 @@ export function diskInventory(
     const pvc = pvcIdx.get(k);
     const dv = dvIdx.get(k);
     const uses = users.get(k) ?? [];
-    const kind = classifyDisk(pvc, dv, uses, libraryNs);
+    const stateFor = pvc?.metadata.labels?.['persistent-state-for'];
+    // A VM state claim is listed under its VM (it takes room on the datastore), and hidden once its VM is gone.
+    const stateOf = stateFor ? vms.filter(v => v.metadata.namespace === pvc?.metadata.namespace && v.metadata.name === stateFor) : [];
+    const kind = stateOf.length ? 'vm' : classifyDisk(pvc, dv, uses, libraryNs);
     if (kind === 'internal') {
       hidden++;
       continue;
@@ -418,7 +427,6 @@ export function diskInventory(
       a['hangar.magesgate.com/media'] === 'iso' ||
       uses.some(u => u.device === 'cdrom') ||
       (kind === 'image' && /(^|[-_.])iso($|[-_.])/i.test(o.metadata.name));
-    const stateFor = pvc?.metadata.labels?.['persistent-state-for'];
     rows.push({
       key: k,
       namespace: o.metadata.namespace as string,
@@ -426,13 +434,7 @@ export function diskInventory(
       kind,
       pvc,
       dv,
-      uses: stateFor
-        ? uses.length
-          ? uses
-          : vms
-              .filter(v => v.metadata.namespace === o.metadata.namespace && v.metadata.name === stateFor)
-              .map(vm => ({ vm, slot: 'VM state', device: 'state' as const }))
-        : uses,
+      uses: stateOf.length && !uses.length ? stateOf.map(vm => ({ vm, slot: 'VM state', device: 'state' as const })) : uses,
       sizeBytes: claimSize(pvc, dv),
       datastore: pvc?.spec?.storageClassName ?? dv?.spec?.storage?.storageClassName ?? dv?.spec?.pvc?.storageClassName,
       state: diskState(pvc, dv),
@@ -440,8 +442,6 @@ export function diskInventory(
       formerVmUid: pvc?.metadata.labels?.['kubevirt.io/created-by'] ?? dv?.metadata.labels?.['kubevirt.io/created-by'],
     });
   }
-  // A VM state claim of a running VM counts as attached.
-  for (const r of rows) if (r.kind === 'unattached' && r.uses.length) r.kind = 'vm';
   return { rows, hidden };
 }
 

@@ -107,7 +107,7 @@ export function DisksTab({ d, inv }: { d: HangarData; inv: DiskInventory }) {
           />
         )}
         <Box sx={{ flex: 1 }} />
-        {inv.hidden > 0 && k8s && <K8sName>{inv.hidden} CDI working claims hidden</K8sName>}
+        {inv.hidden > 0 && k8s && <K8sName>{inv.hidden} CDI working claims and KubeVirt VM state claims hidden</K8sName>}
         <SearchField value={q} onChange={setQ} label="Filter the disks" />
       </Toolbar>
       <DiskTable rows={rows} d={d} empty={inv.rows.length === 0} filter={filter} snaps={snaps} ceph={ceph} />
