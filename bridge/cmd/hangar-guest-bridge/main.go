@@ -20,6 +20,7 @@ import (
 	"github.com/kalik1/hangar/bridge/internal/apis/v1alpha1"
 	"github.com/kalik1/hangar/bridge/internal/app"
 	"github.com/kalik1/hangar/bridge/internal/guest"
+	"github.com/kalik1/hangar/bridge/internal/guestfiles"
 	"github.com/kalik1/hangar/bridge/internal/guestinfo"
 	"github.com/kalik1/hangar/bridge/internal/launcher"
 )
@@ -76,18 +77,25 @@ func main() {
 	klog.Flush()
 }
 
-// handlers serves guestinfo through one libvirt connection per launcher pod
-// on this node. guestfiles answers 501 until it is implemented.
+// handlers serves guestinfo and guestfiles through one libvirt connection
+// per launcher pod on this node. guestfiles records its changes as Events
+// on the VMIs.
 func handlers(podsDir string) app.HandlersFunc {
-	return func(ctx context.Context, _ app.Env) (map[string]guest.Handler, error) {
+	return func(ctx context.Context, env app.Env) (map[string]guest.Handler, error) {
 		dialer := &launcher.Dialer{PodsDir: podsDir}
 		pool := agent.NewPool(agent.PoolConfig{Dial: dialer.Dial})
+		files := &guestfiles.Handler{
+			VMs:    pool,
+			Events: &guestfiles.KubeRecorder{Events: env.Kube.CoreV1(), Node: env.NodeName},
+		}
 		go func() {
 			<-ctx.Done()
+			files.Close()
 			pool.Close()
 		}()
 		return map[string]guest.Handler{
-			v1alpha1.SubresourceGuestInfo: &guestinfo.Handler{VMs: pool},
+			v1alpha1.SubresourceGuestInfo:  &guestinfo.Handler{VMs: pool},
+			v1alpha1.SubresourceGuestFiles: files,
 		}, nil
 	}
 }
