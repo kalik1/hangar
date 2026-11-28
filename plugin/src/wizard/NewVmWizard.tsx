@@ -34,7 +34,7 @@ import { useK4allMetadata, useServiceAccounts } from '../api/k4all';
 import { useNetFacts } from '../api/podnet';
 import { useProtectionPolicy } from '../api/protection';
 import { datastores } from '../model/capacity';
-import { setClipboardAnnotation, sidecarGateOn, sidecarImage } from '../model/clipboard';
+import { CLIPBOARD_MOVE_NOTE, setClipboardAnnotation, sidecarGateOn, sidecarImage } from '../model/clipboard';
 import { DNS_POLICIES, dnsProblems, DnsSettings, hostSearchHint, isDefaultDns } from '../model/dns';
 import { flavorFrom, KIND_CLUSTER, KIND_NS } from '../model/flavors';
 import { folders, L_FOLDER } from '../model/inventory';
@@ -999,6 +999,7 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
                 <Typography sx={{ fontSize: 12.5, color: t.muted, ml: 4, mt: -0.5 }}>
                   Copy and paste between this computer and the VM&apos;s desktop. The guest needs the SPICE agent (spice-vdagent: Fedora and Ubuntu desktops have it; Windows: spice-guest-tools).
                 </Typography>
+                {s.clipboard && <Typography sx={{ fontSize: 12.5, color: '#B7791F', ml: 4 }}>{CLIPBOARD_MOVE_NOTE}</Typography>}
               </Box>
               <Field label="Power policy">
                 <TextField select size="small" value={s.runStrategy} onChange={e => set({ runStrategy: e.target.value })} sx={{ minWidth: 260 }} inputProps={{ 'aria-label': 'Power policy' }}>

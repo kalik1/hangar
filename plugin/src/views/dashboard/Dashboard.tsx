@@ -13,6 +13,7 @@ import { last, useMetrics } from '../../api/metrics';
 import { useTopolvmPools } from '../../api/storage';
 import { alarms, Severity } from '../../model/alarms';
 import { compute, datastores } from '../../model/capacity';
+import { CLIPBOARD_NOT_LIVE_MIGRATABLE } from '../../model/clipboard';
 import { hostPools } from '../../model/hostPools';
 import { datacenterName } from '../../model/inventory';
 import { hostState } from '../../model/inventory';
@@ -214,6 +215,7 @@ function Mobility() {
   let live = 0;
   let devices = 0;
   let disks = 0;
+  let clipboard = 0;
   let other = 0;
   for (const v of d.vmis) {
     if (!v.status?.nodeName) continue;
@@ -221,11 +223,17 @@ function Mobility() {
     if (g.ok) live++;
     else if (g.reason === 'HostDeviceNotLiveMigratable') devices++;
     else if (g.reason === 'DisksNotLiveMigratable') disks++;
+    else if (g.reason === CLIPBOARD_NOT_LIVE_MIGRATABLE) clipboard++;
     else other++;
   }
-  const total = live + devices + disks + other;
+  const total = live + devices + disks + clipboard + other;
   if (!total) return null;
-  const tied = [disks ? `${disks} on disks local to a host` : '', devices ? `${devices} with host devices` : '', other ? `${other} for other reasons` : '']
+  const tied = [
+    disks ? `${disks} on disks local to a host` : '',
+    devices ? `${devices} with host devices` : '',
+    clipboard ? `${clipboard} with clipboard sharing` : '',
+    other ? `${other} for other reasons` : '',
+  ]
     .filter(Boolean)
     .join(', ');
   return (

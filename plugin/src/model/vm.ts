@@ -5,6 +5,7 @@
  */
 
 import { LedTone } from '../ui/tokens';
+import { CLIPBOARD_NOT_LIVE_WHY, clipboardOnVmi } from './clipboard';
 import { Condition, Obj, VM, VMDisk, VMI, VMInterface, VMNetwork, VMVolume } from './types';
 import { parseQuantity } from './units';
 
@@ -483,6 +484,7 @@ export function pendingRestart(vm: VM): string | undefined {
 export function liveMigratable(vm: VM, vmi?: VMI | null): { ok: boolean; why?: string } {
   const c = cond(vmi ?? null, 'LiveMigratable');
   if (!vmi) return { ok: false, why: 'The VM is not running.' };
+  if (clipboardOnVmi(vmi)) return { ok: false, why: CLIPBOARD_NOT_LIVE_WHY };
   if (!c) return { ok: false, why: 'The host has not reported it yet.' };
   if (c.status === 'True') return { ok: true };
   return { ok: false, why: c.message || c.reason };

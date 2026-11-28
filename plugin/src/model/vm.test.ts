@@ -1,4 +1,5 @@
-import { disks, guestOs, hardware, nics, osFromSources, powerActions, powerState } from './vm';
+import { CLIPBOARD_NOT_LIVE_WHY, setClipboardAnnotation } from './clipboard';
+import { disks, guestOs, hardware, liveMigratable, nics, osFromSources, powerActions, powerState } from './vm';
 
 const vm = (status: any, spec: any = {}, meta: any = {}) => ({ metadata: { name: 'web', namespace: 'prod', ...meta }, spec, status });
 
@@ -89,5 +90,19 @@ describe('guest OS', () => {
     const hint = osFromSources(fromLib, new Map([['lib/cirros', 'cirros']]));
     expect(guestOs(fromLib, null, hint).name).toBe('CirrOS');
     expect(guestOs(vm({})).name).toBe('Unknown OS');
+  });
+});
+
+describe('live migratable (CPU and memory hot-add)', () => {
+  const vmi = (annotations?: Record<string, string>) => ({
+    metadata: { name: 'v', namespace: 'demo', annotations },
+    status: { conditions: [{ type: 'LiveMigratable', status: 'True' }] },
+  });
+  it('is not with the clipboard port, though KubeVirt says it is', () => {
+    expect(liveMigratable({ metadata: { name: 'v' } }, vmi()).ok).toBe(true);
+    expect(liveMigratable({ metadata: { name: 'v' } }, vmi(setClipboardAnnotation({}, true, 'quay.io/kubevirt/sidecar-shim:v1.9.1')))).toEqual({
+      ok: false,
+      why: CLIPBOARD_NOT_LIVE_WHY,
+    });
   });
 });

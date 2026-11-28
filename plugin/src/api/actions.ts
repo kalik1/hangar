@@ -4,8 +4,9 @@
  * the live objects.
  */
 
+import { alignedClipboardSidecars, clipboardOnVm, HOOK_ANNOTATION, sidecarImage } from '../model/clipboard';
 import { Task, tasks, TaskTarget, Until } from '../model/tasks';
-import { VM } from '../model/types';
+import { Obj, VM } from '../model/types';
 import { errorText, kdelete, kjsonpatch, kmerge, kpost, kput, kreq } from './client';
 import { PATHS } from './resources';
 
@@ -33,6 +34,27 @@ const vmTarget = (vm: VM): TaskTarget => ({ kind: 'vm', namespace: vm.metadata.n
 const ns = (vm: VM) => vm.metadata.namespace as string;
 const nm = (vm: VM) => vm.metadata.name;
 
+/**
+ * Before a VM with clipboard sharing starts: its hook gets the sidecar-shim
+ * image of the cluster's KubeVirt, when KubeVirt was updated since the
+ * clipboard was turned on. Best effort: without it the VM starts with the
+ * image it names.
+ */
+export async function alignClipboardSidecar(vm: VM): Promise<void> {
+  const annotations = vm.spec?.template?.metadata?.annotations;
+  if (!clipboardOnVm(vm)) return;
+  try {
+    const kv = (await kreq<{ items?: Obj[] }>(KUBEVIRTS)).items?.[0];
+    if (!kv?.status?.observedKubeVirtVersion) return;
+    const value = alignedClipboardSidecars(annotations, sidecarImage(kv));
+    if (value) await kmerge(PATHS.vm(ns(vm), nm(vm)), { spec: { template: { metadata: { annotations: { [HOOK_ANNOTATION]: value } } } } });
+  } catch {
+    /* the VM starts with the image it has */
+  }
+}
+
+const KUBEVIRTS = '/apis/kubevirt.io/v1/kubevirts';
+
 export function powerOn(vm: VM, opts: { paused?: boolean } = {}) {
   return runTask(
     {
@@ -40,7 +62,10 @@ export function powerOn(vm: VM, opts: { paused?: boolean } = {}) {
       target: vmTarget(vm),
       until: { type: 'vmPower', namespace: ns(vm), name: nm(vm), kinds: opts.paused ? ['paused'] : ['on'] },
     },
-    () => kput(PATHS.vmSub(ns(vm), nm(vm), 'start'), opts.paused ? { paused: true } : {})
+    async () => {
+      await alignClipboardSidecar(vm);
+      return kput(PATHS.vmSub(ns(vm), nm(vm), 'start'), opts.paused ? { paused: true } : {});
+    }
   );
 }
 
@@ -63,7 +88,10 @@ export function restart(vm: VM, opts: { force?: boolean } = {}) {
       target: vmTarget(vm),
       until: { type: 'vmPower', namespace: ns(vm), name: nm(vm), kinds: ['on'] },
     },
-    () => kput(PATHS.vmSub(ns(vm), nm(vm), 'restart'), opts.force ? { gracePeriodSeconds: 0 } : {})
+    async () => {
+      await alignClipboardSidecar(vm);
+      return kput(PATHS.vmSub(ns(vm), nm(vm), 'restart'), opts.force ? { gracePeriodSeconds: 0 } : {});
+    }
   );
 }
 

@@ -12,6 +12,7 @@
  */
 
 import { Datastore } from './capacity';
+import { CLIPBOARD_NOT_LIVE_MIGRATABLE, CLIPBOARD_NOT_LIVE_WHY, clipboardOnVmi } from './clipboard';
 import { storageKind } from './storage';
 import { Obj } from './types';
 import { formatBytes, parseQuantity } from './units';
@@ -338,9 +339,14 @@ const LIVE_REASONS: Record<string, string> = {
   FilesystemsNotLiveMigratable: 'It shares a host folder (virtiofs).',
 };
 
-/** Why KubeVirt refuses to move the running VM, in plain words (null: it can). */
+/**
+ * Why the running VM cannot move live, in plain words (ok: it can): KubeVirt's
+ * LiveMigratable, and before it what QEMU refuses that KubeVirt does not
+ * know of (Hangar's clipboard port).
+ */
 export function liveGate(vmi: Obj | null | undefined): { ok: boolean; reason?: string; why?: string } {
   if (!vmi) return { ok: false, reason: 'NotRunning', why: 'The VM is not running.' };
+  if (clipboardOnVmi(vmi)) return { ok: false, reason: CLIPBOARD_NOT_LIVE_MIGRATABLE, why: CLIPBOARD_NOT_LIVE_WHY };
   const c = cond(vmi, 'LiveMigratable');
   if (!c) return { ok: false, reason: 'Unknown', why: 'Its host has not said yet whether it can move.' };
   if (c.status === 'True') return { ok: true };
