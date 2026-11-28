@@ -2,7 +2,8 @@
  * The VM summary's "Reachable at": every address the VM answers on, with a
  * copy button: its published ports (the line to type: ssh -p 30022 …,
  * http://…/, the cluster DNS name) and its own addresses on secondary
- * networks. Managed in Configure → Published ports.
+ * networks and its web addresses through the ingress. Managed in Configure →
+ * Published ports.
  */
 
 import { Icon } from '@iconify/react';
@@ -11,13 +12,16 @@ import Button from '@mui/material/Button';
 import React from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { useHangar } from '../../api/data';
+import { useWebData } from '../../api/web';
 import { accessProblem, hostAddresses, PortRow } from '../../model/ports';
 import { VM } from '../../model/types';
+import { issuerOf, tlsState, webRows } from '../../model/web';
 import { hrefFor } from '../../shell/nav';
 import { Panel } from '../../ui/kit';
 import { tabular } from '../../ui/tokens';
 import { useTokens } from '../../ui/useTokens';
 import { CopyButton, LiveLabel, MODE_ICON, rowCopyLine, rowLive, useVmPorts } from './portParts';
+import { tlsWords } from './WebLine';
 
 interface Line {
   key: string;
@@ -32,6 +36,7 @@ export function ReachableCard({ vm }: { vm: VM }) {
   const d = useHangar();
   const t = useTokens();
   const ports = useVmPorts(vm);
+  const web = useWebData(vm.metadata.namespace as string, 30000);
   const lines: Line[] = [];
   const byGuest = (r: PortRow) => `${r.name ?? `port ${r.guest}`} (${r.guest}/${r.protocol})`;
   for (const r of ports.rows) {
@@ -49,6 +54,10 @@ export function ReachableCard({ vm }: { vm: VM }) {
         live: label,
       });
     } else lines.push({ key: r.key, icon: MODE_ICON.address, text: copy ?? 'Waiting for its address', what: `${byGuest(r)}, on its own address`, live: label });
+  }
+  for (const w of webRows(Array.isArray(web.ingresses) ? web.ingresses : [], ports.services, vm.metadata.name)) {
+    const tw = tlsWords(tlsState(w.ingress, w.host, web.certificates), issuerOf(w.ingress)?.name);
+    lines.push({ key: w.key, icon: 'mdi:web', text: `https://${w.host}${w.path}`, what: `Web address (${w.guest ?? w.servicePort}/TCP) through the ingress`, live: <LiveLabel tone={tw.tone}>{tw.text}</LiveLabel> });
   }
   for (const s of ports.access.secondary)
     for (const ip of s.ips) lines.push({ key: `${s.nic}/${ip}`, icon: 'mdi:lan', text: ip, what: `Directly on ${s.network.split('/').pop()} (${s.nic})` });

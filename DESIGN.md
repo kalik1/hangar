@@ -328,6 +328,37 @@ history keeps growing, the tasks keep being followed.
   `cilium-l2announce-<ns>.<svc>` in kube-system) / failed (MetalLB
   `AllocationFailed`, Cilium `cilium.io/IPAMRequestSatisfied=False`, in
   words). Every change is also a task.
+  **A web address** (H-08b, `src/model/web.ts`, `src/api/web.ts`): an HTTP
+  port of the guest at `https://<host>/` through the cluster's ingress, one
+  Ingress per address (`<vm>-web-<hash5 of the host>`, owned by the VM,
+  labelled like the Services), whose backend is the VM's `<vm>-cluster`
+  Service (its port is added when missing, so the selector and the "VM
+  behind it" state are the same). TLS ends at the ingress; a guest serving
+  only HTTPS publishes on its own address or a host port instead. The class
+  is the default one, else the only one, else the user picks; through
+  Traefik's controller (`traefik.io/ingress-controller`) the Ingress gets
+  `router.entrypoints: websecure` and `router.tls: "true"`, so the VM is
+  never reachable over plain HTTP through the ingress and no redirect
+  Middleware is needed; other controllers get no controller annotation and
+  their own behaviour applies. The host: a DNS-1123 name, no wildcard, not
+  used by an Ingress Hangar can see; suggested `<vm>-<folder>.<ingress
+  IPv4>.nip.io` (the address from an Ingress status of the class, else
+  Traefik's Service). The certificate: a cert-manager ClusterIssuer or
+  folder Issuer with its Ready condition (the annotation and `spec.tls` with
+  `<ingress>-tls`; an ACME HTTP-01 issuer is refused for a nip.io name of a
+  private address), or the ingress's default certificate with the browser
+  warning said plainly and no `spec.tls`. The row: the address the name
+  must point at (the Ingress's `status.loadBalancer`, or "waiting for the
+  ingress to publish its address"), the TLS state from the Ingress and
+  `certificates.cert-manager.io` (default / requesting / valid until /
+  failed / unknown: no right to read Certificates, or a Secret made
+  elsewhere), never from a Secret, and a one-time URL test: one no-cors
+  fetch with a 5 s timeout, whose answer proves only that this browser
+  reached the name and trusted a certificate for it; a failure cannot tell
+  DNS, routing and TLS apart, so it says so next to a link that opens the
+  address. Headlamp (v0.46) sets no Content-Security-Policy on its page
+  (only `sandbox` on service-proxy responses); a policy that refuses the
+  fetch (a `securitypolicyviolation`) hides the button.
 - **Flavors** (`/hangar/flavors/vm|cpu|tuning`):
   - VM flavors: KubeVirt instancetypes grouped in families with plain names
     (Balanced, Burstable, CPU intensive, Memory intensive, Network
@@ -616,7 +647,10 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
   kube-system, which Hangar's roles do not grant (MetalLB's `nodeAssigned`
   Event covers its first hour). Port ranges are one Service entry each (a
   Service has no ranges), at most 100 at a time. SCTP is not in KubeVirt's
-  port list.
+  port list. A web address carries HTTP to the guest (TLS ends at the
+  ingress); removing it keeps the port inside the cluster. cert-manager
+  keeps a web address's certificate Secret after the Ingress goes unless it
+  runs with `--enable-certificate-owner-ref`.
 - With Cilium, its `cni-exclusive` setting disables Multus: networks
   can be created but VMs get no secondary NIC until it is turned off.
 - With Cilium's kube-proxy replacement, VMs on the pod network

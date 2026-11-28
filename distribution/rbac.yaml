@@ -3,9 +3,10 @@
 #
 #   hangar-viewer       sees VMs, hosts, datastores, networks, the library, events,
 #                       ServiceAccounts (the wizard's pick for k4all's metadata service),
-#                       published ports (Services, EndpointSlices, address pools)
+#                       published ports (Services, EndpointSlices, address pools,
+#                       Ingresses and their classes, cert-manager Certificates and issuers)
 #   hangar-vm-operator  + power operations, consoles, migrations, snapshots,
-#                       publishing a VM's ports (Services)
+#                       publishing a VM's ports (Services, Ingresses)
 #   hangar-vm-admin     + creates, edits, clones and deletes VMs, disks, images;
 #                       creates the Secret of a VM whose cloud-init user data is
 #                       longer than KubeVirt takes inline (create only: no role
@@ -69,6 +70,14 @@ rules:
   - apiGroups: [cilium.io]
     resources: [ciliumloadbalancerippools]
     verbs: [get, list]
+  # Web addresses: the Ingresses, the classes to pick from, and the TLS state
+  # from cert-manager's Certificates and issuers (never the TLS Secret).
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, ingressclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [cert-manager.io]
+    resources: [certificates, issuers, clusterissuers]
+    verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -107,9 +116,13 @@ rules:
   - apiGroups: [snapshot.kubevirt.io]
     resources: [virtualmachinesnapshots, virtualmachinerestores]
     verbs: [create, delete]
-  # Publish a VM's ports: its Services (owned by the VM, deleted with it).
+  # Publish a VM's ports: its Services and web addresses (Ingresses), owned
+  # by the VM, deleted with it.
   - apiGroups: ['']
     resources: [services]
+    verbs: [create, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
     verbs: [create, patch, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
