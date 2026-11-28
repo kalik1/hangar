@@ -17,13 +17,18 @@ import (
 // returns them, from testdata/<name>.json. A key is a command name, or
 // "guest-ssh-get-authorized-keys <user>".
 type fixture struct {
-	Replies map[string]struct {
-		Return       json.RawMessage `json:"return"`
-		LibvirtError *struct {
-			Code    uint32 `json:"code"`
-			Message string `json:"message"`
-		} `json:"libvirtError"`
-	} `json:"replies"`
+	Replies map[string]fixtureReply `json:"replies"`
+}
+
+// fixtureReply is a command's return, or libvirt's error for it.
+type fixtureReply struct {
+	Return       json.RawMessage `json:"return"`
+	LibvirtError *fixtureError   `json:"libvirtError"`
+}
+
+type fixtureError struct {
+	Code    uint32 `json:"code"`
+	Message string `json:"message"`
 }
 
 // fixtureCaller is an agent.Caller that answers from a fixture and records
@@ -86,6 +91,14 @@ func (f *fixtureCaller) AgentCommand(_, cmd string, _ time.Duration) (string, er
 		return "", libvirt.Error{Code: r.LibvirtError.Code, Message: r.LibvirtError.Message}
 	}
 	return `{"return":` + string(r.Return) + `}`, nil
+}
+
+// setReply adds or replaces the reply to a fixture's key, for a test's own
+// case. The recorded fixtures stay as the guests answered.
+func (f *fixtureCaller) setReply(key string, r fixtureReply) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fx.Replies[key] = r
 }
 
 // names returns the names of the commands called, in order.
