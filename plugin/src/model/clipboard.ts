@@ -90,6 +90,19 @@ export function clipboardOnVmi(vmi: Obj | null | undefined): boolean {
 }
 
 /**
+ * QEMU refuses to migrate a VM with the qemu-vdagent port (a migration
+ * blocker KubeVirt does not know of: its LiveMigratable stays True). So a
+ * VM started with the clipboard on moves to another host only powered off,
+ * until it is powered off and on with the clipboard off.
+ */
+export const CLIPBOARD_NOT_LIVE_MIGRATABLE = 'ClipboardNotLiveMigratable';
+export const CLIPBOARD_NOT_LIVE_WHY =
+  'Clipboard sharing was on when it started, and QEMU cannot move the clipboard port: it cannot move while running. Turn the clipboard off and power the VM off and on to move it live.';
+/** What turning the clipboard on costs, said before it is turned on. */
+export const CLIPBOARD_MOVE_NOTE =
+  'While it is on, the VM cannot move to another host while running (Migrate, maintenance mode, live disk moves): QEMU cannot move the clipboard port. It moves powered off.';
+
+/**
  * What the console can do: 'shared' (the running VM has the port), 'pending'
  * (on, from the next power-on), 'off-pending' (turned off, the running VM
  * still has it), 'none'.
@@ -125,6 +138,18 @@ export function withSidecarGate(kubevirt: Obj): Obj {
   const gates: string[] = out.spec.configuration.developerConfiguration.featureGates ?? [];
   if (!gates.includes(SIDECAR_GATE)) out.spec.configuration.developerConfiguration.featureGates = [...gates, SIDECAR_GATE];
   return out;
+}
+
+/**
+ * The template annotation with Hangar's hook on the given sidecar-shim
+ * image, when it names another one (KubeVirt was updated since the
+ * clipboard was turned on); null when it is up to date, off, or not
+ * readable. Other sidecars are kept as they are.
+ */
+export function alignedClipboardSidecars(annotations: Record<string, string> | undefined, image: string): string | null {
+  const list = parseSidecars(annotations?.[HOOK_ANNOTATION]);
+  if (!list || !list.some(s => isClipboardSidecar(s) && s.image !== image)) return null;
+  return JSON.stringify(list.map(s => (isClipboardSidecar(s) ? { ...s, image } : s)));
 }
 
 /** The hook entry Hangar adds to a VM's template. */

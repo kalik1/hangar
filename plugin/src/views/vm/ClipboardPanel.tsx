@@ -11,7 +11,7 @@ import React from 'react';
 import { setVmClipboard } from '../../api/clipboard';
 import { useHangar } from '../../api/data';
 import { NOT_ALLOWED, useCan, useVmPerms } from '../../api/permissions';
-import { clipboardMode, clipboardOnVm, HOOK_ANNOTATION, sidecarGateOn, sidecarImage } from '../../model/clipboard';
+import { CLIPBOARD_MOVE_NOTE, clipboardMode, clipboardOnVm, HOOK_ANNOTATION, sidecarGateOn, sidecarImage } from '../../model/clipboard';
 import { Obj } from '../../model/types';
 import { key } from '../../model/vm';
 import { useK8s } from '../../shell/settings';
@@ -106,6 +106,10 @@ export function ClipboardPanel({ vm }: { vm: Obj }) {
         console&apos;s Clipboard panel. The guest needs the SPICE agent (spice-vdagent, already in Fedora and Ubuntu desktops;
         Windows: spice-guest-tools) and a logged-in desktop. A change applies at the next power-on.
         {why && wanted === false ? ` ${why}.` : ''}
+      </Typography>
+      {/* Said before it is turned on: a VM with the clipboard moves only powered off. */}
+      <Typography sx={{ fontSize: 12.5, color: wanted || mode === 'off-pending' ? t.muted : '#B7791F', mt: 0.5 }}>
+        {mode === 'off-pending' ? 'Until its next power-on the VM cannot move to another host while running: QEMU cannot move the clipboard port.' : CLIPBOARD_MOVE_NOTE}
       </Typography>
       {!gateOn && !wanted && <GateHint gate="Sidecar" sx={{ mt: 0.5 }}>KubeVirt&apos;s Sidecar feature is off in this datacenter{canGate ? ': turning clipboard sharing on turns it on.' : '.'}</GateHint>}
       {k8s && (

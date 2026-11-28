@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  alignedClipboardSidecars,
   CLIPBOARD_HOOK_CM,
   CLIPBOARD_HOOK_SCRIPT,
   clipboardMode,
@@ -46,6 +47,21 @@ describe('annotation', () => {
     expect(clipboardOnVm(next)).toBe(true);
     expect(clipboardOnVm(vm)).toBe(false);
     expect(withClipboard(next, false, IMG).spec.template.metadata.annotations).toBeUndefined();
+  });
+});
+
+describe('sidecar image at the next power-on', () => {
+  const NEW = 'quay.io/kubevirt/sidecar-shim:v1.9.1';
+  it('moves Hangar hook to the cluster image, other sidecars as they are', () => {
+    const ann = setClipboardAnnotation({ [HOOK_ANNOTATION]: JSON.stringify([other]) }, true, IMG);
+    const value = alignedClipboardSidecars(ann, NEW);
+    expect(JSON.parse(value!)).toEqual([other, { ...JSON.parse(ann[HOOK_ANNOTATION])[1], image: NEW }]);
+  });
+  it('leaves an up-to-date, missing or unreadable hook alone', () => {
+    expect(alignedClipboardSidecars(setClipboardAnnotation({}, true, NEW), NEW)).toBeNull();
+    expect(alignedClipboardSidecars({ [HOOK_ANNOTATION]: JSON.stringify([other]) }, NEW)).toBeNull();
+    expect(alignedClipboardSidecars(undefined, NEW)).toBeNull();
+    expect(alignedClipboardSidecars({ [HOOK_ANNOTATION]: 'not json' }, NEW)).toBeNull();
   });
 });
 

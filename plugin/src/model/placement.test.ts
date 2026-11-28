@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CLIPBOARD_NOT_LIVE_WHY, setClipboardAnnotation } from './clipboard';
 import {
   claimLocality,
   coldCpuModel,
@@ -65,6 +66,11 @@ function vmi(name: string, nodeName: string, live: { status: string; reason?: st
       conditions: [{ type: 'LiveMigratable', ...live }, { type: 'StorageLiveMigratable', status: 'True' }],
     },
   };
+}
+
+/** The running instance as KubeVirt makes it from a template with Hangar's clipboard hook. */
+function withClipboardHook(i: Obj): Obj {
+  return { ...i, metadata: { ...i.metadata, annotations: setClipboardAnnotation({}, true, 'quay.io/kubevirt/sidecar-shim:v1.9.1') } };
 }
 
 function launcher(vmName: string, nodeName: string, memGi: number, limits: Record<string, string> = {}): Obj {
@@ -222,6 +228,13 @@ describe('live gate', () => {
     ).toBe('Disk web-01-rootdisk is stored on one host only (not shared storage).');
     expect(liveGate(vmi('v', 'a')).ok).toBe(true);
   });
+  it('a VM started with the clipboard cannot move live, whatever KubeVirt says', () => {
+    const g = liveGate(withClipboardHook(vmi('v', 'a')));
+    expect(g).toMatchObject({ ok: false, reason: 'ClipboardNotLiveMigratable' });
+    expect(g.why).toMatch(/Turn the clipboard off/);
+    // Turned on, not restarted yet: the running VM has no clipboard port.
+    expect(liveGate(vmi('v', 'a')).ok).toBe(true);
+  });
 });
 
 describe('placement verdicts', () => {
@@ -326,5 +339,17 @@ describe('placement verdicts', () => {
     const rows = evacuationPlan('a', [v, vm('gpu')], vmiIdx, { nodes, launchers: [], pvcs, pvs });
     expect(rows.find(r => r.vm.metadata.name === 'ceph')).toMatchObject({ live: true, targets: ['b'] });
     expect(rows.find(r => r.vm.metadata.name === 'gpu')!.why).toMatch(/device of its host/);
+  });
+
+  it('the same Ceph VM with the clipboard: Migrate and maintenance refuse it live, it still moves powered off', () => {
+    const clip = withClipboardHook(vmi('ceph', 'a'));
+    const p = placement({ vm: v, vmi: clip, nodes, launchers: [launcher('ceph', 'a', 2)], pvcs, pvs });
+    const b = p.hosts.find(h => h.host === 'b')!;
+    expect(b.live.ok).toBe(false);
+    expect(b.live.reasons).toContain(CLIPBOARD_NOT_LIVE_WHY);
+    expect(b.cold.ok).toBe(true);
+    const rows = evacuationPlan('a', [v], new Map([['demo/ceph', clip]]), { nodes, launchers: [], pvcs, pvs });
+    expect(rows[0]).toMatchObject({ live: false, why: CLIPBOARD_NOT_LIVE_WHY, targets: [] });
+    expect(rows[0].coldTargets).toContain('b');
   });
 });
