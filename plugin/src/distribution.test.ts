@@ -174,7 +174,11 @@ describe('the guest bridge bundle', () => {
   it('runs on every host with the profile the prototype measured', () => {
     expect(pod.tolerations).toEqual([{ operator: 'Exists' }]);
     expect(pod.serviceAccountName).toBe('hangar-guest-bridge');
-    expect(pod.securityContext).toMatchObject({ runAsUser: 0, seLinuxOptions: { type: 'spc_t' } });
+    expect(pod.securityContext).toMatchObject({
+      runAsUser: 0,
+      seLinuxOptions: { type: 'spc_t' },
+      seccompProfile: { type: 'RuntimeDefault' },
+    });
     expect(container.securityContext).toEqual({
       privileged: false,
       allowPrivilegeEscalation: false,

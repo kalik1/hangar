@@ -192,8 +192,8 @@ kubectl apply -k distribution/guest-bridge
 
 Each pod reaches the VMs of its host through their launcher pods' libvirt
 sockets, under the kubelet's `/var/lib/kubelet/pods` (read-only): it runs as
-root with only the `DAC_OVERRIDE` capability, as `spc_t` under SELinux, not
-privileged (the namespace's Pod Security level is `privileged`, as the node
+root with only the `DAC_OVERRIDE` capability, as `spc_t` under SELinux, with
+the runtime's default seccomp filter, not privileged (the namespace's Pod Security level is `privileged`, as the node
 agent needs too). A call for a VM on another host goes to the bridge pod of
 that host. The bridge makes its own CA and serving certificate (the Secret
 `hangar-guest-bridge-tls`) and sets the APIService's `caBundle`; it needs no

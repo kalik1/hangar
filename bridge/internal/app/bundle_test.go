@@ -24,6 +24,7 @@ import (
 
 	"github.com/kalik1/hangar/bridge/internal/app"
 	"github.com/kalik1/hangar/bridge/internal/certs"
+	"github.com/kalik1/hangar/bridge/internal/launcher"
 	"github.com/kalik1/hangar/bridge/internal/peer"
 )
 
@@ -174,6 +175,27 @@ func TestTheBundleMatchesTheBridge(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("no projected token of audience %s at %s", peer.Audience, app.DefaultPeerTokenFile)
+	}
+
+	// The kubelet's pods directory, where the dialer looks for the
+	// launchers: the host's, read-only, at the same path, without mount
+	// propagation.
+	var pods *corev1.VolumeMount
+	for i := range c.VolumeMounts {
+		if c.VolumeMounts[i].MountPath == launcher.DefaultPodsDir {
+			pods = &c.VolumeMounts[i]
+		}
+	}
+	if pods == nil {
+		t.Fatalf("nothing is mounted at %s", launcher.DefaultPodsDir)
+	}
+	if !pods.ReadOnly || pods.MountPropagation != nil {
+		t.Errorf("%s: readOnly %v, mountPropagation %v", launcher.DefaultPodsDir, pods.ReadOnly, pods.MountPropagation)
+	}
+	for _, v := range pod.Spec.Volumes {
+		if v.Name == pods.Name && (v.HostPath == nil || v.HostPath.Path != launcher.DefaultPodsDir) {
+			t.Errorf("%s is not the host's: %+v", launcher.DefaultPodsDir, v.VolumeSource)
+		}
 	}
 
 	// The RBAC names the bridge's own objects.

@@ -77,6 +77,10 @@ spec:
         runAsGroup: 0
         seLinuxOptions:
           type: spc_t
+        # The runtime's default filter: the bridge falls back from openat2
+        # where it is refused.
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: bridge
           image: ghcr.io/kalik1/hangar-guest-bridge:0.2.0
