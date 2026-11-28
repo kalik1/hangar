@@ -69,8 +69,14 @@ history keeps growing, the tasks keep being followed.
   suspend, resume, power off, delete; right-click menu.
 - **VM page**: the faceplate (3), a "restart to apply your changes" bar
   when KubeVirt reports RestartRequired, then tabs:
-  - Summary: guest (agent: OS, hostname, kernel, IPs, users, filesystems
-    with usage), hardware and devices, notes (edit in place), tags, usage,
+  - Summary: guest (agent: OS, kernel and architecture, host name, time
+    zone, the agent's version and since when it is connected, IPs per
+    interface, saying when they do not come from the agent, the users
+    logged in with their names on hover, filesystems with usage and a
+    warning at 85 %; through the guest bridge, the load averages and a
+    clock more than 5 s off the host's; without an agent, how to install
+    it for the guest's OS; with one that does not respond, how to restart
+    it), hardware and devices, notes (edit in place), tags, usage,
     "Reachable at" (each address the VM answers on, with the line to copy:
     `ssh -p 30022 user@host`, `http://192.0.2.10/`, the cluster DNS name, its
     own address on a secondary network), placement and policies (host,
@@ -121,6 +127,34 @@ history keeps growing, the tasks keep being followed.
     Ctrl+C/X in the console on plain http (a user gesture); otherwise the
     panel's "Copy to this computer" does it. VMs without it keep "Type
     text".
+  - Guest: everything the QEMU guest agent reports, read every 30 s while
+    the tab is open, from KubeVirt's API (the VMI's status, the
+    subresources guestosinfo, userlist and filesystemlist) and from the
+    guest bridge's `guestinfo` (`subresources.hangar.magesgate.com`, the
+    agent's read-only commands). Sections: System (OS, kernel, host name,
+    time zone, the guest's clock against the host's, the agent's version,
+    since when it is connected, its commands and which are disabled), CPU
+    (vCPUs online, each CPU's times, load), Memory (memory blocks next to
+    the configured size), Disks and filesystems (the guest's disks matched
+    to the VM's by serial, then PCI address, then libvirt's device name,
+    with partitions and I/O counters; usage bars; freeze state), Network
+    (the guest's interfaces matched to the VM's adapters by MAC, with
+    addresses and counters; routes on qemu-ga 9.1 and later), Users,
+    Devices and drivers (Windows, virtio-win drivers marked), SSH keys
+    (read only: root, the VM's cloud-init users from its inline user data,
+    passed as `sshUsers`, and the users logged in). Each section says where
+    its data comes from and when it was read, and why a part is missing:
+    the bridge is not installed (then the tab has KubeVirt's part and says
+    what the bridge adds), the user's role lacks `guestinfo` on this VM (a
+    SelfSubjectAccessReview that names the VM; `hangar-viewer` grants it),
+    the agent is not connected (with how to install it), the agent does not
+    respond (from the bridge's health, never from `AgentConnected`, which
+    stays True on a broken agent; with the restart line, and KubeVirt's
+    data marked as possibly stale), a command the guest blocks (with the
+    guest-side change for its OS: on RHEL-family guests a `sed` that adds
+    the commands to `FILTER_RPC_ARGS`, or the systemd drop-in that empties
+    it, each followed by the agent's restart), or a command too new for
+    the guest's agent (with the version it needs).
   - Configure: CPU/memory/size profile, firmware and TPM (with persistent
     UEFI variables and TPM state), CPU flags (require/disable, with the hosts
     that offer each flag from KubeVirt's node labels), reservation and
@@ -677,6 +711,15 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
   ingress); removing it keeps the port inside the cluster. cert-manager
   keeps a web address's certificate Secret after the Ingress goes unless it
   runs with `--enable-certificate-owner-ref`.
+- The Guest tab: the guest's disks match the VM's for certain by serial
+  (KubeVirt sets none by default) or PCI address; otherwise by libvirt's
+  device name, which the guest usually, not always, uses too. SSH keys of
+  a cloud-init user whose user data is in a Secret are read only once that
+  user logs in (no Hangar role reads Secrets). Headlamp keeps only an
+  error's message, so the bridge's `retryAfterSeconds` is not read: a 503
+  is asked again after 2 s, twice, then at the next 30 s poll. The Windows
+  paths (devices and drivers) are tested with fixtures only until
+  kalik1/hangar#19.
 - With Cilium, its `cni-exclusive` setting disables Multus: networks
   can be created but VMs get no secondary NIC until it is turned off.
 - With Cilium's kube-proxy replacement, VMs on the pod network
