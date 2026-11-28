@@ -21,26 +21,49 @@ const (
 	testSecret    = "hangar-guest-bridge-tls"
 )
 
+// fakePatcher is an APIService's caBundle: ensures counts the checks,
+// calls the patches that changed it.
 type fakePatcher struct {
-	mu    sync.Mutex
-	calls [][]byte
-	err   error
+	mu      sync.Mutex
+	current []byte
+	ensures int
+	calls   [][]byte
+	err     error
 }
 
-func (p *fakePatcher) PatchCABundle(_ context.Context, ca []byte) error {
+func (p *fakePatcher) EnsureCABundle(_ context.Context, ca []byte) (bool, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.err != nil {
-		return p.err
+		return false, p.err
 	}
+	p.ensures++
+	if string(p.current) == string(ca) {
+		return false, nil
+	}
+	p.current = ca
 	p.calls = append(p.calls, ca)
-	return nil
+	return true, nil
 }
 
+// count is the number of patches.
 func (p *fakePatcher) count() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return len(p.calls)
+}
+
+func (p *fakePatcher) checks() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.ensures
+}
+
+// recreate stands for an APIService deleted and applied again: no caBundle.
+func (p *fakePatcher) recreate() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.current = nil
 }
 
 type countingListener struct{ n int }
@@ -156,8 +179,8 @@ func TestCreateConflictUsesTheOtherPodsSecret(t *testing.T) {
 	if e.m.CA() != nil {
 		t.Fatal("loaded something before reading the other pod's Secret")
 	}
-	if e.patcher.count() != 0 {
-		t.Error("a pod that lost the create patched the APIService")
+	if e.patcher.checks() != 0 {
+		t.Error("a pod that lost the create set the APIService's caBundle")
 	}
 	if err := e.m.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
@@ -185,8 +208,8 @@ func TestOnlyTheLeaseHolderRenews(t *testing.T) {
 	if n := countActions(e.client, "update"); n != 0 {
 		t.Fatalf("the follower updated the Secret %d times", n)
 	}
-	if e.patcher.count() != 0 {
-		t.Fatal("the follower patched the APIService")
+	if e.patcher.checks() != 0 {
+		t.Fatal("the follower read or patched the APIService")
 	}
 
 	// The Lease holder renews it with the same CA.
@@ -211,8 +234,8 @@ func TestOnlyTheLeaseHolderRenews(t *testing.T) {
 	if cert, _ := e.m.CurrentCertKeyContent(); string(cert) != string(renewed.Cert) {
 		t.Error("the Lease holder does not serve the renewed certificate")
 	}
-	if e.patcher.count() != 1 {
-		t.Errorf("caBundle patches %d, want 1 at the start of the term", e.patcher.count())
+	if e.patcher.checks() != 1 || e.patcher.count() != 1 {
+		t.Errorf("caBundle checks %d, patches %d; want 1 and 1 at the start of the term", e.patcher.checks(), e.patcher.count())
 	}
 }
 
@@ -246,7 +269,7 @@ func TestTheLeaseHolderReplacesAnUnusableSecret(t *testing.T) {
 	}
 }
 
-func TestCABundlePatchCadence(t *testing.T) {
+func TestCABundleCheckCadence(t *testing.T) {
 	e := newEnv(t, secretOf(mustGenerate(t, t0)))
 	e.leader = true
 	ctx := context.Background()
@@ -257,38 +280,50 @@ func TestCABundlePatchCadence(t *testing.T) {
 	if err := e.m.Reconcile(ctx); err == nil {
 		t.Fatal("no error for a missing APIService")
 	}
-	if e.m.patched() {
-		t.Fatal("patched() after a failed patch")
+	if e.m.ensured() {
+		t.Fatal("ensured() after a failed patch")
 	}
 	e.patcher.err = nil
 	if err := e.m.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if e.patcher.count() != 1 || !e.m.patched() {
+	if e.patcher.count() != 1 || !e.m.ensured() {
 		t.Fatalf("patches %d", e.patcher.count())
 	}
-	// Nothing changed: no patch until PatchInterval.
+	// Nothing changed: no check until CheckInterval.
 	e.clock.Step(time.Minute)
 	if err := e.m.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if e.patcher.count() != 1 {
-		t.Fatalf("patched again after a minute")
+	if e.patcher.checks() != 1 {
+		t.Fatalf("checked %d times after a minute, want 1", e.patcher.checks())
 	}
+	// After CheckInterval it checks, and patches nothing: the caBundle is
+	// right.
+	e.clock.Step(5 * time.Minute)
+	if err := e.m.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if e.patcher.checks() != 2 || e.patcher.count() != 1 {
+		t.Fatalf("after CheckInterval: %d checks, %d patches; want 2 and 1", e.patcher.checks(), e.patcher.count())
+	}
+	// The APIService was applied again without a caBundle: the next check
+	// sets it.
+	e.patcher.recreate()
 	e.clock.Step(5 * time.Minute)
 	if err := e.m.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if e.patcher.count() != 2 {
-		t.Fatalf("no patch after PatchInterval")
+		t.Fatalf("a recreated APIService was not patched (%d patches)", e.patcher.count())
 	}
-	// A new term patches at once.
+	// A new term checks at once.
 	e.m.StartedLeading(ctx)
 	if err := e.m.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if e.patcher.count() != 3 {
-		t.Fatalf("no patch at the start of a term")
+	if e.patcher.checks() != 4 || e.patcher.count() != 2 {
+		t.Fatalf("at the start of a term: %d checks, %d patches; want 4 and 2", e.patcher.checks(), e.patcher.count())
 	}
 }
 

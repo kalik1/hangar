@@ -3,6 +3,7 @@ package certs
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apiserver/pkg/server/dynamiccertificates"
@@ -26,14 +28,17 @@ import (
 // APIServiceGVR is the resource of APIServices.
 var APIServiceGVR = schema.GroupVersionResource{Group: "apiregistration.k8s.io", Version: "v1", Resource: "apiservices"}
 
-// CABundlePatcher sets the caBundle of the bridge's APIService.
+// CABundlePatcher keeps the caBundle of the bridge's APIService.
 type CABundlePatcher interface {
-	PatchCABundle(ctx context.Context, caPEM []byte) error
+	// EnsureCABundle makes caPEM the APIService's caBundle. It reads the
+	// APIService and patches it only when its caBundle differs; changed
+	// says whether it patched.
+	EnsureCABundle(ctx context.Context, caPEM []byte) (changed bool, err error)
 }
 
 // NewAPIServicePatcher returns a CABundlePatcher of the named APIService. It
-// needs only the patch verb on it, and never creates it: removing the bridge
-// deletes the APIService first.
+// needs only the get and patch verbs on it, and never creates it: removing
+// the bridge deletes the APIService first.
 func NewAPIServicePatcher(client dynamic.Interface, name string) CABundlePatcher {
 	return &apiServicePatcher{client: client, name: name}
 }
@@ -43,13 +48,25 @@ type apiServicePatcher struct {
 	name   string
 }
 
-func (p *apiServicePatcher) PatchCABundle(ctx context.Context, caPEM []byte) error {
+func (p *apiServicePatcher) EnsureCABundle(ctx context.Context, caPEM []byte) (bool, error) {
+	as, err := p.client.Resource(APIServiceGVR).Get(ctx, p.name, metav1.GetOptions{})
+	if err != nil {
+		return false, err
+	}
+	// spec.caBundle is base64 in JSON. Anything unreadable is replaced.
+	if current, ok, _ := unstructured.NestedString(as.Object, "spec", "caBundle"); ok {
+		if got, err := base64.StdEncoding.DecodeString(current); err == nil && bytes.Equal(got, caPEM) {
+			return false, nil
+		}
+	}
 	patch, err := json.Marshal(map[string]any{"spec": map[string]any{"caBundle": caPEM}})
 	if err != nil {
-		return err
+		return false, err
 	}
-	_, err = p.client.Resource(APIServiceGVR).Patch(ctx, p.name, types.MergePatchType, patch, metav1.PatchOptions{})
-	return err
+	if _, err := p.client.Resource(APIServiceGVR).Patch(ctx, p.name, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Config configures a Manager.
@@ -71,10 +88,11 @@ type Config struct {
 	// SyncInterval is how often the Secret is read once loaded. Zero means
 	// a minute.
 	SyncInterval time.Duration
-	// PatchInterval is how often the Lease holder sets the caBundle again
-	// when it is not known to have changed, in case the APIService was
-	// recreated. Zero means 5 minutes.
-	PatchInterval time.Duration
+	// CheckInterval is how often the Lease holder checks the caBundle
+	// again when it is not known to have changed, in case the APIService
+	// was recreated or replaced: it reads the APIService, and patches it
+	// only when its caBundle differs. Zero means 5 minutes.
+	CheckInterval time.Duration
 }
 
 // Manager keeps the bridge's certificates. It is the server's serving
@@ -89,8 +107,9 @@ type Manager struct {
 
 	mu        sync.Mutex
 	listeners []dynamiccertificates.Listener
-	patchedCA []byte
-	patchedAt time.Time
+	// ensuredCA is the CA last checked to be the caBundle, ensuredAt when.
+	ensuredCA []byte
+	ensuredAt time.Time
 }
 
 var _ dynamiccertificates.CertKeyContentProvider = &Manager{}
@@ -103,8 +122,8 @@ func NewManager(cfg Config) *Manager {
 	if cfg.SyncInterval == 0 {
 		cfg.SyncInterval = time.Minute
 	}
-	if cfg.PatchInterval == 0 {
-		cfg.PatchInterval = 5 * time.Minute
+	if cfg.CheckInterval == 0 {
+		cfg.CheckInterval = 5 * time.Minute
 	}
 	return &Manager{cfg: cfg, loaded: make(chan struct{}), kick: make(chan struct{}, 1)}
 }
@@ -156,10 +175,10 @@ func (m *Manager) Loaded(*http.Request) error {
 
 // StartedLeading is leader election's OnStartedLeading. The Lease holder's
 // duties (renewal, repair and the APIService's caBundle) start at once, and a
-// new term sets the caBundle at its start.
+// new term checks the caBundle at its start.
 func (m *Manager) StartedLeading(context.Context) {
 	m.mu.Lock()
-	m.patchedCA = nil
+	m.ensuredCA = nil
 	m.mu.Unlock()
 	m.Kick()
 }
@@ -188,7 +207,7 @@ func (m *Manager) Run(ctx context.Context) {
 		switch {
 		case m.current.Load() == nil:
 			wait = 2 * time.Second
-		case m.isLeader() && !m.patched():
+		case m.isLeader() && !m.ensured():
 			wait = 10 * time.Second
 		}
 		t := time.NewTimer(wait)
@@ -282,33 +301,38 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 	return m.patch(ctx, b, false)
 }
 
-// patch sets the APIService's caBundle when the CA changed, when the term or
-// the bundle is new, or every PatchInterval.
+// patch makes the CA the APIService's caBundle when the CA changed, when the
+// term or the bundle is new, or every CheckInterval. Each time it reads the
+// APIService, and patches only a caBundle that differs.
 func (m *Manager) patch(ctx context.Context, b *Bundle, force bool) error {
 	now := m.cfg.Clock.Now()
 	m.mu.Lock()
-	due := force || !bytes.Equal(m.patchedCA, b.CACert) || now.Sub(m.patchedAt) >= m.cfg.PatchInterval
+	due := force || !bytes.Equal(m.ensuredCA, b.CACert) || now.Sub(m.ensuredAt) >= m.cfg.CheckInterval
 	m.mu.Unlock()
 	if !due {
 		return nil
 	}
-	if err := m.cfg.APIService.PatchCABundle(ctx, b.CACert); err != nil {
+	changed, err := m.cfg.APIService.EnsureCABundle(ctx, b.CACert)
+	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("setting the APIService's caBundle: the APIService does not exist (yet): %w", err)
 		}
 		return fmt.Errorf("setting the APIService's caBundle: %w", err)
 	}
+	if changed {
+		klog.InfoS("Set the guest bridge's CA as the APIService's caBundle", "secret", m.Name())
+	}
 	m.mu.Lock()
-	m.patchedCA, m.patchedAt = bytes.Clone(b.CACert), now
+	m.ensuredCA, m.ensuredAt = bytes.Clone(b.CACert), now
 	m.mu.Unlock()
 	return nil
 }
 
-func (m *Manager) patched() bool {
+func (m *Manager) ensured() bool {
 	b := m.current.Load()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return b != nil && bytes.Equal(m.patchedCA, b.CACert)
+	return b != nil && bytes.Equal(m.ensuredCA, b.CACert)
 }
 
 // load makes b the served bundle, and tells the listeners when it changed.

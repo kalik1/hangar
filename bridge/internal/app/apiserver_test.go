@@ -311,7 +311,7 @@ func (c *cluster) install(ctx context.Context, t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "hangar-guest-bridge"},
 		Rules: []rbacv1.PolicyRule{
 			{APIGroups: []string{"kubevirt.io"}, Resources: []string{"virtualmachineinstances"}, Verbs: []string{"get"}},
-			{APIGroups: []string{"apiregistration.k8s.io"}, Resources: []string{"apiservices"}, Verbs: []string{"patch"}, ResourceNames: []string{app.APIServiceName}},
+			{APIGroups: []string{"apiregistration.k8s.io"}, Resources: []string{"apiservices"}, Verbs: []string{"get", "patch"}, ResourceNames: []string{app.APIServiceName}},
 		},
 	}, metav1.CreateOptions{}))
 	for _, role := range []string{"hangar-guest-bridge", "system:auth-delegator"} {
