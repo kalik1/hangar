@@ -1,8 +1,9 @@
 name: CI
 
 # Every pull request and every push to main: lint, type check, unit tests,
-# build of the plugin, the cluster bundles, and a build of the image for
-# amd64 and arm64 (not pushed). The release workflow runs the same checks before a release.
+# build of the plugin, the cluster bundles, a build of the image for
+# amd64 and arm64 (not pushed), and the guest bridge's Go checks. The release
+# workflow runs the same checks before a release.
 
 on:
   push:
@@ -63,6 +64,50 @@ jobs:
             plugin/dist/main.js
             plugin/package.json
           if-no-files-found: error
+
+  bridge:
+    name: Guest bridge (vet, tests, govulncheck, amd64 and arm64 builds)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bridge
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The toolchain line of bridge/go.mod decides the Go version.
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: bridge/go.mod
+          cache-dependency-path: bridge/go.sum
+
+      - name: go.mod and go.sum are tidy
+        run: go mod tidy -diff
+
+      - name: Vet
+        run: go vet ./...
+
+      # The API server test runs two bridges behind a real kube-apiserver
+      # and etcd (envtest), whose binaries it downloads.
+      - name: Tests
+        env:
+          HANGAR_ENVTEST_DOWNLOAD: v1.36.2
+        run: go test -race ./...
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
+
+      - name: Static builds for amd64 and arm64
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+        run: |
+          for arch in amd64 arm64; do
+            GOARCH="$arch" go build -trimpath -o "${RUNNER_TEMP}/hangar-guest-bridge-$arch" ./cmd/hangar-guest-bridge
+          done
 
   bundles:
     name: Cluster bundles

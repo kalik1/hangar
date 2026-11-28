@@ -112,6 +112,7 @@ export function ToolButton({
   label,
   onClick,
   disabled,
+  unavailable,
   pressed,
   tooltip,
   buttonRef,
@@ -121,6 +122,8 @@ export function ToolButton({
   label: string;
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
+  /** Looks disabled but still takes a click, which says why (aria-disabled). */
+  unavailable?: boolean;
   pressed?: boolean;
   /** Longer than the label, e.g. why it is disabled. */
   tooltip?: string;
@@ -135,6 +138,7 @@ export function ToolButton({
       size="small"
       aria-label={label}
       aria-pressed={pressed}
+      aria-disabled={unavailable || undefined}
       onClick={onClick}
       disabled={disabled}
       {...aria}
@@ -143,6 +147,7 @@ export function ToolButton({
         width: 30,
         height: 30,
         ...(pressed ? { background: 'rgba(255,255,255,0.12)', color: '#fff' } : {}),
+        ...(unavailable ? { color: t.chassisMuted, opacity: 0.45 } : {}),
       }}
     >
       <Icon icon={icon} width={18} height={18} />
@@ -410,6 +415,75 @@ export function ScreenNotice({
           </Button>
         )}
       </Box>
+    </Box>
+  );
+}
+
+/**
+ * A line across the top of the screen that the user closes: a notice about
+ * the console itself (the picture stays usable below it), with one action.
+ */
+export function ScreenBanner({
+  tone = 'info',
+  children,
+  action,
+  onClose,
+}: {
+  tone?: 'info' | 'warn';
+  children: React.ReactNode;
+  action?: { label: string; onClick: () => void; busy?: boolean };
+  onClose: () => void;
+}) {
+  const t = useTokens();
+  return (
+    <Box
+      role="status"
+      sx={{
+        position: 'absolute',
+        top: 8,
+        left: 8,
+        right: 8,
+        zIndex: 3,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1,
+        py: 0.75,
+        pl: 1.25,
+        pr: 0.5,
+        fontSize: 13,
+        lineHeight: 1.45,
+        color: t.chassisText,
+        background: 'rgba(12,14,13,0.92)',
+        border: `1px solid ${tone === 'warn' ? '#B7791F' : t.chassisEdge}`,
+        borderRadius: `${t.radius.small}px`,
+        boxShadow: '0 2px 10px rgba(0,0,0,0.35)',
+      }}
+    >
+      <Icon icon={tone === 'warn' ? 'mdi:alert-outline' : 'mdi:information-outline'} width={18} style={{ flex: 'none', opacity: 0.85 }} />
+      <Box sx={{ flex: 1, minWidth: 0 }}>{children}</Box>
+      {action && (
+        <Button
+          size="small"
+          variant="contained"
+          disableElevation
+          disabled={action.busy}
+          onClick={action.onClick}
+          sx={{
+            flex: 'none',
+            textTransform: 'none',
+            fontWeight: 600,
+            color: t.chassis,
+            background: t.chassisText,
+            '&:hover': { background: '#FFFFFF' },
+            '&.Mui-focusVisible': { outline: `2px solid ${CHASSIS_FOCUS}`, outlineOffset: '2px' },
+          }}
+        >
+          {action.label}
+        </Button>
+      )}
+      <IconButton size="small" aria-label="Close" onClick={onClose} sx={{ ...chassisButton(t.chassisMuted, t.chassisMuted), flex: 'none' }}>
+        <Icon icon="mdi:close" width={16} height={16} />
+      </IconButton>
     </Box>
   );
 }

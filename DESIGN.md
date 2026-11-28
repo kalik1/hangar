@@ -84,6 +84,28 @@ history keeps growing, the tasks keep being followed.
     the windows tell each other through a BroadcastChannel). If the browser
     blocks pop-ups the console opens in an in-page window (Headlamp
     activity) that says so.
+  - Resize the desktop to the window (a toolbar switch next to Fit): the
+    console asks for the size of its screen over VNC (RFB SetDesktopSize,
+    the ExtendedDesktopSize extension; QEMU passes it to the display
+    device, which only virtio-gpu takes) and the guest's desktop follows
+    the window, the pop-up or the embedded console, with no guest agent.
+    On by default with the VirtIO video card and a server that announced
+    ExtendedDesktopSize; the choice is kept per VM in the browser. Requests
+    wait 300 ms after the last resize, never go below 640×480 and keep the
+    width in steps of 8 (the width CVT modes take); a size the guest
+    answered with another is not asked again until the window changes. A
+    request with no change in 5 s says once that the guest did not change
+    its resolution (from 90 s after a power-on, while firmware and boot
+    loader ignore requests) and the screen is scaled meanwhile. With VGA,
+    Bochs, Cirrus or ramfb the switch is disabled; a click on it says why,
+    with a one-click change to VirtIO (at the next restart) for users who
+    may patch the VM. noVNC keeps the extension private
+    (`console/desktopSize.ts` is the one place that reaches into it), so
+    its own `resizeSession` stays off. The wizard gives desktop guests (an
+    image or installer named Workstation, Desktop, KDE…) the VirtIO card
+    where the `VideoConfig` gate is on. Windows is offered the checkbox
+    unchecked (it needs viogpudo from virtio-win) until its lab test,
+    kalik1/hangar#19, passes (`WINDOWS_VIRTIO_VIDEO_DEFAULT`).
   - Clipboard sharing (Configure → Clipboard sharing, or the wizard's last
     step): a KubeVirt hook sidecar (feature gate `Sidecar`, KubeVirt's
     sidecar-shim image, a script in the ConfigMap `hangar-clipboard-hook`
@@ -629,6 +651,10 @@ npm run lint && npm run tsc && npm test && npm run build   # dist/main.js
   the flavor it was sized with.
 - KubeVirt allows one console client per VM: a new console (window, tab,
   another user) takes over the previous one.
+- Resizing the desktop to the window needs the VirtIO video card (a
+  restart to change it), a guest with the virtio-gpu driver whose desktop
+  follows the display (GNOME, KDE on Wayland; Windows with the VirtIO GPU
+  driver, viogpudo) and changes the desktop for every console of the VM.
 - "Type text" types for a US keyboard layout in the guest.
 - Clipboard sharing needs spice-vdagent in the guest and an unlocked
   desktop session (a locked screen or the login screen has no agent), the

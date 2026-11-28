@@ -30,6 +30,7 @@ import { kpost } from '../api/client';
 import { prepareClipboard } from '../api/clipboard';
 import { HangarData, useHangar } from '../api/data';
 import { useClusterDns } from '../api/dns';
+import { useGate } from '../api/gates';
 import { useK4allMetadata, useServiceAccounts } from '../api/k4all';
 import { useNetFacts } from '../api/podnet';
 import { useProtectionPolicy } from '../api/protection';
@@ -62,11 +63,12 @@ import { K8sName,KV } from '../ui/kit';
 import { tabular } from '../ui/tokens';
 import { useTokens } from '../ui/useTokens';
 import { CpuModelSelect, FlavorPicker, useFlavorFamilies } from '../views/flavors/parts';
+import { GateHint } from '../views/settings/GateHint';
 import { K4allLink } from '../views/settings/K4allManaged';
 import { datastoreItems, renderDatastore } from '../views/storage/DatastorePick';
 import { confirmSidecarGate } from '../views/vm/ClipboardPanel';
 import { DnsFields, DnsResult } from '../views/vm/DnsPanel';
-import { libraryImages, OS_CHOICES, osChoice, preferenceFor, sizeProfiles } from './catalog';
+import { libraryImages, OS_CHOICES, osChoice, preferenceFor, sizeProfiles, virtioVideoDefault } from './catalog';
 import { GuestAgentOption } from './GuestAgentOption';
 
 export interface WizardPreset {
@@ -124,6 +126,8 @@ interface State {
   startPaused: boolean;
   headless: boolean;
   sound: '' | 'ich9' | 'ac97';
+  /** The VirtIO video card; null: on for a desktop guest where KubeVirt lets the card be chosen. */
+  virtioVideo: boolean | null;
   /** k4all's metadata service; null: k4all's default (on when its service is on). */
   metadata: boolean | null;
   /** Whose tokens the guest gets; '' = the folder's default ServiceAccount. */
@@ -296,6 +300,7 @@ function initialState(d: HangarData, preset: WizardPreset, libraryNs: string): S
     startPaused: false,
     headless: false,
     sound: '',
+    virtioVideo: null,
     metadata: null,
     serviceAccount: '',
   };
@@ -331,6 +336,10 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
   const maxCpu = Math.max(0, ...d.nodes.map(n => parseQuantity(n.status?.allocatable?.cpu) || 0));
   const maxMem = Math.max(0, ...d.nodes.map(n => parseQuantity(n.status?.allocatable?.memory) || 0));
   const selectedImg = imgs.find(i => `${i.namespace}/${i.name}` === s.image);
+  // A desktop guest gets the VirtIO card, so its desktop follows the console window (hangar#4).
+  const videoGate = useGate('VideoConfig');
+  const sourceImg = s.sourceKind === 'image' ? selectedImg : s.sourceKind === 'iso' ? imgs.find(i => `${i.namespace}/${i.name}` === s.iso) : undefined;
+  const virtioVideo = !s.headless && videoGate.on !== false && (s.virtioVideo ?? (videoGate.on === true && virtioVideoDefault(os, sourceImg)));
   const minRoot = s.sourceKind === 'image' && selectedImg ? Math.max(1, Math.ceil(selectedImg.sizeBytes / GiB)) : 1;
   const flavorList = useFlavorFamilies(s.folder).all;
   const chosenFlavor = flavorList.find(o => o.metadata.name === s.profile && (s.profileKind === KIND_NS ? o.metadata.namespace === s.folder : !o.metadata.namespace));
@@ -452,6 +461,7 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
       startPaused: s.startPaused,
       headless: s.headless,
       sound: s.sound || undefined,
+      video: virtioVideo ? 'virtio' : undefined,
       metadata: mdOn ? { serviceAccount: s.serviceAccount.trim() || undefined } : undefined,
     };
   };
@@ -1041,6 +1051,19 @@ export function NewVmWizard({ preset, onClose }: { preset: WizardPreset; onClose
                   <MenuItem value="ich9">Audio: Intel HD Audio</MenuItem>
                   <MenuItem value="ac97">Audio: AC97</MenuItem>
                 </TextField>
+              </Box>
+              <Box>
+                <FormControlLabel
+                  control={<Checkbox checked={virtioVideo} disabled={s.headless || videoGate.on === false} onChange={e => set({ virtioVideo: e.target.checked })} />}
+                  label="VirtIO video card: the desktop resizes with the console window"
+                />
+                {videoGate.on === false ? (
+                  <GateHint gate="VideoConfig" sx={{ ml: 4, mt: -0.5 }} />
+                ) : (
+                  <Typography sx={{ fontSize: 12.5, color: t.muted, ml: 4, mt: -0.5 }}>
+                    On for Linux desktops: they need the virtio-gpu driver and a desktop that follows the display (GNOME, KDE on Wayland). Windows needs the viogpudo driver from virtio-win.
+                  </Typography>
+                )}
               </Box>
               <Box>
                 <FormControlLabel
